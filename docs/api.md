@@ -16,6 +16,8 @@ All routes are relative to the backend root. List endpoints accept page (default
 | /product | Detail and product information |
 | /carts | Current-user cart read/add/remove via refresh cookie verified against active PostgreSQL session |
 | /inventory | Public read/lookup, update admin-only |
+| /products/catalog, /product/:id | Public product pricing; applies discounts only when the product-discount assignment is active **and** the discount is within its inclusive start/end period |
+
 | /health | HTTP and PostgreSQL status |
 | /media/:scope/:id/:filename | Public image delivery from private storage |
 
@@ -67,6 +69,12 @@ Voucher types: PERCENTAGE, FIXED and FREE_ITEM. Groups: CHECKOUT and SHIPPING. S
 | PATCH | /user-vouchers/:id | Bearer JWT; admin only, marks USED |
 
 Claims start as CLAIMED. To claim, send voucherId (userId is optional for a customer and defaults to their authenticated identity; admin may provide userId). Legacy claimedAt and expiredAt inputs may be supplied for compatibility but are **ignored**: claimedAt is the server's UTC clock; expiredAt comes from Voucher.endDate. Voucher must be active, within its start/end time window, and have capacity (maxRedeemed > 0 and max of existing claim rows and redeemedCount below maxRedeemed). Each user can claim a voucher only once, including after USED; duplicates and ineligible vouchers return HTTP 409. Voucher-level PostgreSQL FOR UPDATE locking serializes simultaneous claims without changing the existing schema.
+
+**Discount pricing:** Cart, Catalog, and Product Detail share the same active-assignment and inclusive date checks. Nil/zero discount value produces null discountPrice, percentage and fixed amounts use the same calculation in all three reads, and prices do not drop below zero. This is a deliberate correction of inherited behavior that applied disabled discounts to Cart and expired discounts to Catalog/Detail.
+
+**Category cache:** successful create/update/delete increments a shared Redis revision key (categories:revision); paginated list keys include that revision and expire after one hour. Old versions naturally expire. Redis failures do not block PostgreSQL-backed API reads or report an already-committed write as failed; in the exceptional case of an outage during a mutation, cached data might remain stale until its TTL after Redis recovers.
+
+**Refresh JWT:** a random 128-bit base64url jti differentiates rapid or concurrent logins. The compact refresh JWT deliberately omits optional iat and typ fields to fit the existing Prisma user_tokens.token VARCHAR(255) column, while retaining the mandatory exp, HS256 signature and active database session checks. Access JWT format is unchanged. Dummy login credentials and behavior are unchanged.
 
 The /user endpoint returns each claim with its associated voucher under the vouchers property. The admin use endpoint marks USED; checkout transaction redemption and settlement are not ported yet. Access JWTs are signature-verified and checked against the CURRENT user, active flag and role in PostgreSQL. Admin/Administrator/Super Admin/Superadmin role names have elevated access (case-insensitive); customer access is owner-scoped. Read access to Discounts, Product Discounts and Vouchers is public; all their write operations require a verified current admin in PostgreSQL.
 

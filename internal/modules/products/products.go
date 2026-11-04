@@ -15,6 +15,7 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/infrastructure"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/pricing"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
@@ -334,7 +335,11 @@ func (s *Service) discounts(ids []string) (map[string]ActiveDiscount, error) {
 		return result, nil
 	}
 	var rows []ActiveDiscount
-	err := s.db.Table("product_discounts pd").Select("pd.product_id, d.discount_type, d.value").Joins("JOIN discounts d ON d.id = pd.discount_id").Where("pd.is_active = true AND pd.product_id IN ?", ids).Scan(&rows).Error
+	now := time.Now().UTC()
+	err := s.db.Table("product_discounts pd").Select("pd.product_id, d.discount_type, d.value").
+		Joins("JOIN discounts d ON d.id = pd.discount_id").
+		Where("pd.product_id IN ? AND "+pricing.ActiveAssociation, ids, now, now).
+		Scan(&rows).Error
 	for _, r := range rows {
 		result[r.ProductID] = r
 	}
@@ -348,18 +353,10 @@ func summary(p domain.Product, rate float64, d ActiveDiscount) CatalogItem {
 	if p.Description != nil {
 		item.Description = *p.Description
 	}
-	if d.Value != nil && *d.Value != 0 {
+	if discounted := pricing.DiscountPrice(p.Price, d.Type, d.Value); discounted != nil {
 		item.DiscountType = &d.Type
 		item.DiscountValue = d.Value
-		amount := 0.0
-		switch d.Type {
-		case "FIXED":
-			amount = *d.Value
-		case "PERCENTAGE":
-			amount = p.Price * *d.Value / 100
-		}
-		price := p.Price - amount
-		item.DiscountPrice = &price
+		item.DiscountPrice = discounted
 	}
 	return item
 }

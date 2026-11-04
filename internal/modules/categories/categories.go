@@ -3,7 +3,9 @@ package categories
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
@@ -66,6 +68,7 @@ func (s *Service) create(c fiber.Ctx) error {
 	if err := s.db.Create(&m).Error; err != nil {
 		return err
 	}
+	s.invalidateCache()
 	return c.Status(201).JSON(httpx.Response{Message: httpx.Message("create", "category")})
 }
 func (s *Service) findAll(c fiber.Ctx) error {
@@ -73,11 +76,24 @@ func (s *Service) findAll(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	key := fmt.Sprintf("categories:%d:%d", page, limit)
-	if value, err := s.cache.Get(context.Background(), key).Bytes(); err == nil {
-		var cached json.RawMessage
-		if json.Unmarshal(value, &cached) == nil {
-			return c.Type("json").Send(cached)
+	// The revision is shared across application instances and changes after
+	// a successful mutation. An old in-flight GET may populate an old key but
+	// cannot make newer revisions stale. Old pages expire normally after 1h.
+	// Cache is optional: a disconnected Redis must not stall a storefront
+	// request (or hide otherwise healthy PostgreSQL data).
+	ctx, cancel := context.WithTimeout(c.Context(), 200*time.Millisecond)
+	defer cancel()
+	revision, cacheErr := s.cache.Get(ctx, categoryRevisionKey).Result()
+	if errors.Is(cacheErr, redis.Nil) {
+		revision, cacheErr = "0", nil
+	}
+	key := fmt.Sprintf("categories:v%s:%d:%d", revision, page, limit)
+	if cacheErr == nil {
+		if value, err := s.cache.Get(ctx, key).Bytes(); err == nil {
+			var cached json.RawMessage
+			if json.Unmarshal(value, &cached) == nil {
+				return c.Type("json").Send(cached)
+			}
 		}
 	}
 	var data []domain.Category
@@ -92,8 +108,10 @@ func (s *Service) findAll(c fiber.Ctx) error {
 		return err
 	}
 	response := httpx.Response{Message: httpx.Message("get", "category"), Data: data, Paging: httpx.Pagination(page, limit, total)}
-	if b, err := json.Marshal(response); err == nil {
-		_ = s.cache.Set(context.Background(), key, b, time.Hour).Err()
+	if cacheErr == nil {
+		if b, err := json.Marshal(response); err == nil {
+			_ = s.cache.Set(ctx, key, b, time.Hour).Err()
+		}
 	}
 	return c.JSON(response)
 }
@@ -150,6 +168,7 @@ func (s *Service) update(c fiber.Ctx) error {
 		if err := s.db.Model(&m).Updates(changes).Error; err != nil {
 			return err
 		}
+		s.invalidateCache()
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("update", "category")})
 }
@@ -165,6 +184,7 @@ func (s *Service) remove(c fiber.Ctx) error {
 	if result.RowsAffected == 0 {
 		return httpx.NotFound("category")
 	}
+	s.invalidateCache()
 	return c.JSON(httpx.Response{Message: httpx.Message("delete", "category")})
 }
 
@@ -173,4 +193,18 @@ func valueOrNil(v *string) any {
 		return nil
 	}
 	return *v
+}
+
+// categoryRevisionKey intentionally has no TTL. An expired version counter
+// could resurrect a previously cached page. Page values remain TTL-bound.
+const categoryRevisionKey = "categories:revision"
+
+func (s *Service) invalidateCache() {
+	// Redis is best-effort: a cache outage must not report a failed category
+	// mutation after PostgreSQL has already committed the write.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := s.cache.Incr(ctx, categoryRevisionKey).Err(); err != nil {
+		slog.Warn("category cache revision increment failed", "error", err)
+	}
 }

@@ -31,7 +31,7 @@ func TestCatalogAndProductInformationOnPrismaSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	discountValue := 20.0
-	discount := domain.Discount{Name: "Special", DiscountType: "PERCENTAGE", Value: &discountValue, MaxApplied: 1, MaxRedeemed: 20, StartDate: time.Now().Add(-time.Hour), EndDate: time.Now().Add(time.Hour)}
+	discount := domain.Discount{Name: "Special", DiscountType: "PERCENTAGE", Value: &discountValue, MaxApplied: 1, MaxRedeemed: 20, StartDate: time.Now().UTC().Add(-time.Hour), EndDate: time.Now().UTC().Add(time.Hour)}
 	if err := tx.Create(&discount).Error; err != nil {
 		t.Fatal(err)
 	}

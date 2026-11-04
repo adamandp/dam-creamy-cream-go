@@ -2,6 +2,8 @@ package sessions
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/mileusna/useragent"
@@ -35,8 +37,31 @@ type Claims struct {
 }
 
 func (s *Service) sign(userID, roleID string, ttl time.Duration, secret []byte) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{Role: roleID, RegisteredClaims: jwt.RegisteredClaims{Subject: userID, IssuedAt: jwt.NewNumericDate(time.Now().UTC()), ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(ttl))}})
+	// Access tokens preserve the existing iat+exp JWT format.
+	now := time.Now().UTC()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{Role: roleID, RegisteredClaims: jwt.RegisteredClaims{
+		Subject: userID, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+	}})
 	return token.SignedString(secret)
+}
+
+func (s *Service) signRefresh(userID, roleID string) (string, error) {
+	// Refresh tokens need an unpredictable unique jti even within one second.
+	// The original Prisma column user_tokens.token is VARCHAR(255), so omit
+	// optional JWT iat and typ fields; exp and verified HS256 remain required.
+	// A 128-bit random base64url jti keeps the token below 255 characters.
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	claims := Claims{Role: roleID, RegisteredClaims: jwt.RegisteredClaims{
+		Subject: userID, ID: base64.RawURLEncoding.EncodeToString(id[:]),
+		ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
+	}}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	delete(token.Header, "typ") // optional RFC 7519 field, saves bytes
+	return token.SignedString(s.refreshSecret)
 }
 func (s *Service) parse(token string, secret []byte) (*Claims, error) {
 	if token == "" {
@@ -97,7 +122,7 @@ func (s *Service) NewTokens(ctx context.Context, userID, roleID, existing, agent
 	if err != nil {
 		return Tokens{}, err
 	}
-	refresh, err := s.sign(userID, roleID, 7*24*time.Hour, s.refreshSecret)
+	refresh, err := s.signRefresh(userID, roleID)
 	if err != nil {
 		return Tokens{}, err
 	}

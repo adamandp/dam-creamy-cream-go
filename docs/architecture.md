@@ -31,3 +31,12 @@ Authorization is implemented in the shared sessions service (Actor/RequireActor/
 ## Inherited route security after PR #2 hardening
 
 The shared sessions service owns JWT verification and active refresh-cookie session validation. When a handler uses \`CookieUser\`, it now checks the signed refresh token, its backing UserToken database row, account active state and role, so logout revocation applies immediately to cookie-based Cart and address reads. Access-token middleware independently verifies current user and role. Admin-only mutations protect catalog/category/stock and promotions; addresses are owner-scoped; user list and detail are access controlled. The dummy login is intentionally preserved as a dev/test fixture.
+
+
+## PR #2 correction: shared pricing and cache/session consistency
+
+Product Cart, Catalog and Detail use the common \`internal/modules/pricing\` active-association predicate, inclusive validity timestamps, and discount calculator. ProductDiscount.isActive and Discount.startDate/endDate must pass for a discount price to be shown. The same logic should be reused by future Order/Checkout pricing.
+
+Refreshing customer sessions still uses signed HS256 JWTs and a database-backed UserToken record. Each new refresh JWT has a cryptographically random 128-bit jti, compactly serialized to remain under the original token VARCHAR(255) limit. Refresh JWTs omit optional typ and iat; access JWTs are unchanged. This avoids same-second duplicate token collisions without a database migration.
+
+Category list cache uses Redis key \`categories:revision\` as a shared generation number. Pages are stored at \`categories:v<revision>:<page>:<limit>\` with one-hour TTL; successful writes increment revision, even across horizontally scaled instances. Cache operations are time-bounded and PostgreSQL reads remain available when Redis is down.

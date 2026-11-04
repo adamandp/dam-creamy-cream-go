@@ -37,11 +37,16 @@ func TestCategoryRedisCacheAgainstRealServices(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	key := "categories:1:10"
+	key := "categories:v0:1:10"
 	if err := client.Del(ctx, key).Err(); err != nil {
 		t.Fatal(err)
 	}
 	defer client.Del(context.Background(), key)
+	// No stale shared revision state should leak into the isolated test.
+	if err := client.Del(ctx, "categories:revision").Err(); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Del(context.Background(), "categories:revision")
 	cat := domain.Category{Name: "Ice Cream", IsActive: true}
 	if err := tx.Create(&cat).Error; err != nil {
 		t.Fatal(err)
