@@ -20,15 +20,15 @@ import (
 const MaxImageBytes = 2 * 1024 * 1024
 
 var (
-	ErrInvalidImage = errors.New("only JPEG, PNG and WebP images are allowed")
+	ErrInvalidImage  = errors.New("only JPEG, PNG and WebP images are allowed")
 	ErrImageTooLarge = errors.New("image exceeds 2 MiB")
 	ErrImageNotFound = errors.New("image not found")
-	filenamePattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$`)
+	filenamePattern  = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$`)
 )
 
 type MinIOStore struct {
-	client   *minio.Client
-	bucket   string
+	client    *minio.Client
+	bucket    string
 	publicURL string
 }
 
@@ -46,7 +46,7 @@ func NewMinIO(ctx context.Context, endpoint, accessKey, secretKey, bucket, publi
 		return nil, errors.New("PUBLIC_API_URL must be an absolute http(s) origin without a path")
 	}
 	client, err := minio.New(endpoint, &minio.Options{
-		Creds: credentials.NewStaticV4(accessKey, secretKey, ""),
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
 	})
 	if err != nil {

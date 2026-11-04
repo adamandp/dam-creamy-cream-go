@@ -19,8 +19,8 @@ func TestImageFormat(t *testing.T) {
 		name string
 		data []byte
 		mime string
-		ext string
-		err error
+		ext  string
+		err  error
 	}{
 		{"jpeg", []byte{0xff, 0xd8, 0xff, 0xe0}, "image/jpeg", "jpg", nil},
 		{"png", []byte{137, 80, 78, 71, 13, 10, 26, 10, 0}, "image/png", "png", nil},
