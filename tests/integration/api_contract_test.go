@@ -96,6 +96,8 @@ func TestFirstPassHTTPContractsOnPrismaSchema(t *testing.T) {
 	auth.NewService(tx, session, false).Routes(app)
 	session.Routes(app)
 
+	// Roles only enforce Zod string length, unlike category baseName.
+	testBody(t, testCall(t, app, "POST", "/roles", `{"name":"OPS_2026"}`, "", 201))
 	testBody(t, testCall(t, app, "POST", "/categories", `{"name":"Ice Cream","description":null}`, "", 400))
 	testBody(t, testCall(t, app, "POST", "/categories", `{"name":"123","description":null,"isActive":true}`, "", 400))
 	testBody(t, testCall(t, app, "POST", "/categories", `{"name":"Ice Cream","description":null,"isActive":true}`, "", 201))
@@ -123,6 +125,7 @@ func TestFirstPassHTTPContractsOnPrismaSchema(t *testing.T) {
 	testBody(t, testCall(t, app, "PATCH", "/users/"+user.ID.ID, `{"fullName":"Dummy User"}`, "", 400))
 	testBody(t, testCall(t, app, "PATCH", "/users/"+user.ID.ID, `{"email":"invalid"}`, "", 400))
 	testBody(t, testCall(t, app, "PATCH", "/users/"+user.ID.ID, `{"fullName":"Updated User"}`, "", 200))
+	testBody(t, testCall(t, app, "PATCH", "/users/"+user.ID.ID, `{"gender":"MALE"}`, "", 400))
 	testBody(t, testCall(t, app, "PATCH", "/users/"+user.ID.ID, `{"gender":"MAN"}`, "", 200))
 	var stored domain.User
 	if err := tx.First(&stored, "id = ?", user.ID.ID).Error; err != nil {
@@ -169,6 +172,12 @@ func TestFirstPassHTTPContractsOnPrismaSchema(t *testing.T) {
 	if !ok || len(data) != 0 {
 		t.Fatalf("cart removal failed: %v", cartPayload)
 	}
+	// Nest clears the cookie even when revocation fails.
+	invalidLogout := testCall(t, app, "POST", "/auth/logout", "", "refreshToken=not-a-token", 401)
+	if !strings.Contains(invalidLogout.Header.Get("Set-Cookie"), "refreshToken=") {
+		t.Error("invalid-token logout must clear refresh cookie")
+	}
+	_ = invalidLogout.Body.Close()
 	testBody(t, testCall(t, app, "POST", "/auth/logout", "", cookie, 201))
 	testBody(t, testCall(t, app, "POST", "/sessions/refresh", "", cookie, 401))
 	newLogin := testCall(t, app, "POST", "/auth/dummy-customer-login", "", "", 201)

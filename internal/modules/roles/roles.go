@@ -34,7 +34,7 @@ func (s *Service) create(c fiber.Ctx) error {
 	if err := httpx.Bind(c, &body); err != nil {
 		return err
 	}
-	if err := httpx.Name(body.Name, 1, 50, "name"); err != nil {
+	if err := httpx.NonBlank(body.Name, 1, 50, "name"); err != nil {
 		return err
 	}
 	if err := s.db.Create(&domain.Role{Name: body.Name}).Error; err != nil {
@@ -91,7 +91,7 @@ func (s *Service) update(c fiber.Ctx) error {
 	if err := httpx.Bind(c, &body); err != nil {
 		return err
 	}
-	if err := httpx.Name(body.Name, 1, 50, "name"); err != nil {
+	if err := httpx.NonBlank(body.Name, 1, 50, "name"); err != nil {
 		return err
 	}
 	result := s.db.Model(&domain.Role{}).Where("id = ?", id).Update("name", body.Name)

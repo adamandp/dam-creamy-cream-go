@@ -101,4 +101,4 @@ These endpoints are **first-pass ports**, not verified behaviorally equivalent t
 - MinIO private image uploads, HTTP read endpoint, SQL image URL updates and cleanup verified with a live disposable MinIO instance.
 - CI runs gofmt, go mod tidy, go vet and go test.
 
-Legacy data and schema are never migrated automatically. The NestJS Zod gender input accepts MAN/WOMAN while the original PostgreSQL enum stores MALE/FEMALE; Go accepts both input styles and persists the actual enum. JWT verification and correct access-token signing intentionally harden insecure NestJS behavior. Full NestJS-vs-Go cutover replay is still a separate acceptance step after the remaining modules are ported.
+Legacy data and schema are never migrated automatically. The NestJS Zod gender input accepts MAN/WOMAN while the original PostgreSQL enum stores MALE/FEMALE; Go accepts historic API input MAN/WOMAN and persists the actual MALE/FEMALE enum. JWT verification and correct access-token signing intentionally harden insecure NestJS behavior. Full NestJS-vs-Go cutover replay is still a separate acceptance step after the remaining modules are ported.

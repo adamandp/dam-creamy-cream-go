@@ -57,7 +57,7 @@ jobs:
           # Upstream registries no longer serve this archived server release reliably.
           docker run -d --name minio-test -p 127.0.0.1:9000:9000 \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            kotsadm/minio:RELEASE.2025-09-07T16-13-09Z server /data --address :9000
+            kotsadm/minio@sha256:d3f84d6fc796f6e847070f57630c94744cd14547ff7854cd5872700bb28cbced server /data --address :9000
           for i in $(seq 1 45); do
             if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then break; fi
             sleep 2

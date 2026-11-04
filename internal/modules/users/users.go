@@ -203,9 +203,9 @@ func (s *Service) update(c fiber.Ctx) error {
 	}
 	if body.Gender != nil {
 		switch *body.Gender {
-		case "MAN", "MALE":
+		case "MAN":
 			updates["gender"] = "MALE"
-		case "WOMAN", "FEMALE":
+		case "WOMAN":
 			updates["gender"] = "FEMALE"
 		case "OTHER":
 			updates["gender"] = "OTHER"

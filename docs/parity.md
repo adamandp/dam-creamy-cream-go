@@ -59,5 +59,5 @@ No unimplemented business logic is represented as complete.
 - Private MinIO image upload/read/delete as well as Users/Products image routes tested with real PostgreSQL and MinIO.
 - Redis category cache tested for cold reads, cache hits and one-hour TTL.
 - Intentional security fixes: verify signed JWTs on current-user and refresh endpoints; issue access JWT with the access secret.
-- Prisma enum for gender is MALE/FEMALE/OTHER, while NestJS Zod allows MAN/WOMAN/OTHER. The Go port also accepts those historic input names and writes the correct enum without changing the database.
+- Prisma enum for gender is MALE/FEMALE/OTHER, while NestJS Zod allows MAN/WOMAN/OTHER. The Go port accepts MAN/WOMAN as in the NestJS DTO and writes the correct enum without changing the database.
 - Remaining unported domains and full server-to-server replay remain necessary before production cutover. CI success alone does not establish parity for unported modules.

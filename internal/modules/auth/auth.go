@@ -46,16 +46,17 @@ func (s *Service) clearCookie(c fiber.Ctx) {
 	c.Cookie(&fiber.Cookie{Name: "refreshToken", Value: "", HTTPOnly: true, Secure: s.production, SameSite: "Lax", Path: "/", Expires: time.Unix(0, 0)})
 }
 func (s *Service) logout(c fiber.Ctx) error {
+	// NestJS clears the browser cookie even when token revocation fails.
+	s.clearCookie(c)
 	if err := s.sessions.Logout(context.Background(), c.Cookies("refreshToken")); err != nil {
 		return err
 	}
-	s.clearCookie(c)
 	return c.Status(201).JSON(httpx.Response{Message: "🎉 You have logged out successfully! see u lateer"})
 }
 func (s *Service) logoutAll(c fiber.Ctx) error {
+	s.clearCookie(c)
 	if err := s.sessions.LogoutAll(context.Background(), c.Cookies("refreshToken")); err != nil {
 		return err
 	}
-	s.clearCookie(c)
 	return c.Status(201).JSON(httpx.Response{Message: "🎉 You have logged out all sessions successfully! see u lateer"})
 }
