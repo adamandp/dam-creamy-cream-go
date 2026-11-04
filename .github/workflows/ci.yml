@@ -24,13 +24,11 @@ jobs:
       - run: go test ./...
       - name: MinIO integration test
         run: |
-          # Download the pinned official MinIO server binary, avoiding registry auth/pull failures.
-          base=https://dl.min.io/server/minio/release/linux-amd64/archive
-          release=minio.RELEASE.2025-09-07T16-13-09Z
-          curl -fsSL --retry 3 "$base/$release" -o /tmp/minio
-          curl -fsSL --retry 3 "$base/$release.sha256sum" | awk '{ print $1 "  /tmp/minio" }' | sha256sum --check
-          chmod +x /tmp/minio
-          MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin /tmp/minio server /tmp/minio-integration-data --address :9000 >/tmp/minio-integration.log 2>&1 &
+          # Test-only MinIO server mirror; no production credentials or public ports.
+          # Upstream registries no longer serve this archived server release reliably.
+          docker run -d --name minio-test -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            kotsadm/minio:RELEASE.2025-09-07T16-13-09Z server /data --address :9000
           for i in $(seq 1 45); do
             if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then break; fi
             sleep 2
