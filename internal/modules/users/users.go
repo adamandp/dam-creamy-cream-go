@@ -29,9 +29,9 @@ func NewService(db *gorm.DB, s *sessions.Service, upload infrastructure.ImageSto
 }
 func (s *Service) Routes(app fiber.Router) {
 	r := app.Group("/users")
-	r.Get("/", s.findAll)
+	r.Get("/", s.sessions.RequireAdmin, s.findAll)
 	r.Get("/profile", s.sessions.RequireActor, s.profile)
-	r.Get("/:id", s.findOne)
+	r.Get("/:id", s.sessions.RequireSelfOrAdmin, s.findOne)
 	r.Patch("/:id", s.sessions.RequireSelfOrAdmin, s.update)
 	r.Put("/:id/password", s.sessions.RequireSelf, s.updatePassword)
 	r.Put("/:id/image", s.sessions.RequireSelfOrAdmin, s.updateImage)
@@ -160,6 +160,11 @@ func (s *Service) update(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	// Password changes must use PUT /users/:id/password with the existing
+	// password check. Neither users nor admins can bypass it via PATCH.
+	if body.Password != nil {
+		return httpx.Forbidden()
+	}
 	// Customers may edit their own safe profile fields, but may not change
 	// role assignment, account status, or any other user's account.
 	if !actor.Admin && (body.RoleID != nil || body.IsActive != nil) {
@@ -224,16 +229,6 @@ func (s *Service) update(c fiber.Ctx) error {
 	}
 	if body.IsActive != nil {
 		updates["is_active"] = *body.IsActive
-	}
-	if body.Password != nil {
-		if err := validatePassword(*body.Password); err != nil {
-			return err
-		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(*body.Password), 10)
-		if err != nil {
-			return err
-		}
-		updates["password"] = string(hash)
 	}
 	if httpx.ExplicitNull(c, "email") {
 		updates["email"] = nil

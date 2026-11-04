@@ -44,12 +44,12 @@ type UpdateInput struct {
 
 func (s *Service) Routes(app fiber.Router) {
 	r := app.Group("/addresses")
-	r.Post("/", s.create)
-	r.Get("/", s.findAll)
+	r.Post("/", s.sessions.RequireActor, s.create)
+	r.Get("/", s.sessions.RequireAdmin, s.findAll)
 	r.Get("/user", s.findByUser)
-	r.Get("/:id", s.findOne)
-	r.Patch("/:id", s.update)
-	r.Delete("/:id", s.remove)
+	r.Get("/:id", s.sessions.RequireActor, s.findOne)
+	r.Patch("/:id", s.sessions.RequireActor, s.update)
+	r.Delete("/:id", s.sessions.RequireActor, s.remove)
 }
 func validateInput(body CreateInput) error {
 	if err := httpx.UUID(body.UserID); err != nil {
@@ -86,7 +86,14 @@ func (s *Service) create(c fiber.Ctx) error {
 	if err := validateInput(body); err != nil {
 		return err
 	}
-	err := s.db.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
+	actor, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
+	if !actor.Admin && actor.UserID != body.UserID {
+		return httpx.Forbidden()
+	}
+	err = s.db.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
 		var userCount int64
 		if err := tx.Model(&domain.User{}).Where("id = ?", body.UserID).Count(&userCount).Error; err != nil {
 			return err
@@ -154,6 +161,13 @@ func (s *Service) findOne(c fiber.Ctx) error {
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
 		return err
 	}
+	actor, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
+	if !actor.Admin && actor.UserID != m.UserID {
+		return httpx.Forbidden()
+	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Address"), Data: m})
 }
 func (s *Service) update(c fiber.Ctx) error {
@@ -164,6 +178,13 @@ func (s *Service) update(c fiber.Ctx) error {
 	var m domain.Address
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
 		return err
+	}
+	actor, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
+	if !actor.Admin && actor.UserID != m.UserID {
+		return httpx.Forbidden()
 	}
 	var body UpdateInput
 	if err := httpx.BindStrict(c, &body); err != nil {
@@ -186,11 +207,10 @@ func (s *Service) update(c fiber.Ctx) error {
 			values[f.col] = *f.v
 		}
 	}
+	// Address ownership must not be transferred through a generic PATCH.
+	// Admin may manage address fields, but user reassignment is not supported.
 	if body.UserID != nil {
-		if err := httpx.UUID(*body.UserID); err != nil {
-			return err
-		}
-		values["user_id"] = *body.UserID
+		return httpx.Forbidden()
 	}
 	if body.IsPrimary != nil {
 		values["is_primary"] = *body.IsPrimary
@@ -224,6 +244,13 @@ func (s *Service) remove(c fiber.Ctx) error {
 		var m domain.Address
 		if err := tx.First(&m, "id = ?", id).Error; err != nil {
 			return err
+		}
+		actor, err := s.sessions.Actor(c)
+		if err != nil {
+			return err
+		}
+		if !actor.Admin && actor.UserID != m.UserID {
+			return httpx.Forbidden()
 		}
 		var count int64
 		if err := tx.Model(&domain.Address{}).Where("user_id = ?", m.UserID).Count(&count).Error; err != nil {

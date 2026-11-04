@@ -12,6 +12,7 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/infrastructure"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/categories"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -46,7 +47,7 @@ func TestCategoryRedisCacheAgainstRealServices(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
-	categories.NewService(tx, client).Routes(app)
+	categories.NewService(tx, client, sessions.NewService(tx, "test-access", "test-refresh")).Routes(app)
 	res, err := app.Test(httptest.NewRequest("GET", "/categories?page=1&limit=10", nil))
 	if err != nil {
 		t.Fatal(err)

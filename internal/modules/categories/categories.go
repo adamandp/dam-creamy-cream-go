@@ -8,17 +8,21 @@ import (
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
 type Service struct {
-	db    *gorm.DB
-	cache *redis.Client
+	db       *gorm.DB
+	cache    *redis.Client
+	sessions *sessions.Service
 }
 
-func NewService(db *gorm.DB, cache *redis.Client) *Service { return &Service{db: db, cache: cache} }
+func NewService(db *gorm.DB, cache *redis.Client, ses *sessions.Service) *Service {
+	return &Service{db: db, cache: cache, sessions: ses}
+}
 
 type CreateInput struct {
 	Name        string  `json:"name"`
@@ -33,11 +37,11 @@ type UpdateInput struct {
 
 func (s *Service) Routes(app fiber.Router) {
 	r := app.Group("/categories")
-	r.Post("/", s.create)
+	r.Post("/", s.sessions.RequireAdmin, s.create)
 	r.Get("/", s.findAll)
 	r.Get("/:id", s.findOne)
-	r.Patch("/:id", s.update)
-	r.Delete("/:id", s.remove)
+	r.Patch("/:id", s.sessions.RequireAdmin, s.update)
+	r.Delete("/:id", s.sessions.RequireAdmin, s.remove)
 }
 func (s *Service) create(c fiber.Ctx) error {
 	var body CreateInput

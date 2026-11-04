@@ -63,8 +63,34 @@ func (s *Service) AccessFor(c fiber.Ctx) (*Claims, error) {
 	}
 	return nil, httpx.Unauthorized()
 }
+
+// ActiveRefresh validates the signature AND the backing session row.
+// Merely verifying a JWT is insufficient after logout/logout-all.
+func (s *Service) ActiveRefresh(ctx context.Context, token string) (*Claims, error) {
+	claims, err := s.VerifyRefresh(token)
+	if err != nil {
+		return nil, httpx.Unauthorized()
+	}
+	var activeTokens int64
+	if err := s.db.WithContext(ctx).Model(&domain.UserToken{}).
+		Where("token = ? AND user_id = ? AND \"expiredAt\" > ?", token, claims.Subject, time.Now().UTC()).
+		Count(&activeTokens).Error; err != nil {
+		return nil, err
+	}
+	if activeTokens == 0 {
+		return nil, httpx.Unauthorized()
+	}
+	var user domain.User
+	if err := s.db.WithContext(ctx).First(&user, "id = ?", claims.Subject).Error; err != nil {
+		return nil, httpx.Unauthorized()
+	}
+	if !user.IsActive || user.RoleID != claims.Role {
+		return nil, httpx.Unauthorized()
+	}
+	return claims, nil
+}
 func (s *Service) CookieUser(c fiber.Ctx) (*Claims, error) {
-	return s.VerifyRefresh(c.Cookies("refreshToken"))
+	return s.ActiveRefresh(c.Context(), c.Cookies("refreshToken"))
 }
 func (s *Service) NewTokens(ctx context.Context, userID, roleID, existing, agent, ip string) (Tokens, error) {
 	access, err := s.sign(userID, roleID, 15*time.Minute, s.accessSecret)
@@ -96,16 +122,9 @@ func (s *Service) NewTokens(ctx context.Context, userID, roleID, existing, agent
 	return Tokens{AccessToken: access, RefreshToken: refresh}, nil
 }
 func (s *Service) Refresh(ctx context.Context, token string) (string, error) {
-	claims, err := s.VerifyRefresh(token)
+	claims, err := s.ActiveRefresh(ctx, token)
 	if err != nil {
 		return "", err
-	}
-	var count int64
-	if err := s.db.WithContext(ctx).Model(&domain.UserToken{}).Where("token = ? AND \"expiredAt\" > ?", token, time.Now().UTC()).Count(&count).Error; err != nil {
-		return "", err
-	}
-	if count == 0 {
-		return "", httpx.Unauthorized()
 	}
 	return s.sign(claims.Subject, claims.Role, 15*time.Minute, s.accessSecret)
 }

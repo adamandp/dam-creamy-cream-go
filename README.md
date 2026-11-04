@@ -83,7 +83,7 @@ User and product image uploads accept JPEG, PNG or WebP up to 2 MiB. MinIO bucke
 
 ## Tests and CI
 
-CI checks formatting, go mod tidy, go vet and go test. It runs integration tests against isolated PostgreSQL, Redis and MinIO services, covering GORM schema compatibility, JWT sessions, catalog, cart, promotions, category cache, and image persistence.
+CI checks formatting, go mod tidy, go vet and go test. It runs integration tests against isolated PostgreSQL, Redis and MinIO services, covering GORM schema compatibility, JWT sessions, catalog, cart, promotions, category cache, and image persistence. The PR #2 security follow-up adds tests for catalog/inventory admin authorization, address owner-only access, private user directory/details, password PATCH bypass prevention, and immediate refresh-cookie revocation for Carts/Addresses after logout. Dummy login is intentionally unchanged.
 
 Never run destructive tests using production credentials. Before a public deployment, configure secrets, validate all required endpoints, and restrict CORS origins.
 

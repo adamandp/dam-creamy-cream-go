@@ -6,16 +6,16 @@ All routes are relative to the backend root. List endpoints accept page (default
 
 | Route group | Features |
 |---|---|
-| /auth | Login, logout and logout-all |
+| /auth | Deliberate dummy customer login for testing (unchanged), logout and logout-all |
 | /sessions | Access-token refresh |
 | /roles | Public reads; admin-only create, update, delete |
-| /users | Public reads; profile login required; own profile update and password; image owner/admin; role/status update and delete admin only |
-| /addresses | Create, list, user addresses, update, delete |
-| /categories | CRUD and Redis-cached list |
-| /products | CRUD, catalog and images |
+| /users | Admin-only list; detail self/admin; profile requires active bearer; own safe profile edits; password ONLY through PUT with current password; image self/admin; role/status mutation and delete admin-only |
+| /addresses | Create self/admin; global list admin-only; detail/update/delete owner/admin; /user reads current verified refresh session cookie; ownership transfer prohibited |
+| /categories | Public reads and Redis cache; create/update/delete admin-only |
+| /products | Public catalog/detail; create/update/delete/product-image changes admin-only |
 | /product | Detail and product information |
-| /carts | Current-user cart, add, remove |
-| /inventory | List, lookup and update |
+| /carts | Current-user cart read/add/remove via refresh cookie verified against active PostgreSQL session |
+| /inventory | Public read/lookup, update admin-only |
 | /health | HTTP and PostgreSQL status |
 | /media/:scope/:id/:filename | Public image delivery from private storage |
 
@@ -70,7 +70,11 @@ Claims start as CLAIMED. To claim, send voucherId (userId is optional for a cust
 
 The /user endpoint returns each claim with its associated voucher under the vouchers property. The admin use endpoint marks USED; checkout transaction redemption and settlement are not ported yet. Access JWTs are signature-verified and checked against the CURRENT user, active flag and role in PostgreSQL. Admin/Administrator/Super Admin/Superadmin role names have elevated access (case-insensitive); customer access is owner-scoped. Read access to Discounts, Product Discounts and Vouchers is public; all their write operations require a verified current admin in PostgreSQL.
 
-Role creation/renaming/deletion is admin-only. Customers can edit their own safe profile fields, but cannot set roleId or isActive or edit another user's account. Password changes require the authenticated account owner. User deletion is admin-only. Role changes invalidate access tokens with the old role claim. Admin accounts must already exist in the database or be provisioned out-of-band; there is no public bootstrap-admin endpoint.
+Role creation/renaming/deletion is admin-only. Customers can edit their own safe profile fields, but cannot set roleId or isActive or edit another user's account. Password changes require the authenticated account owner **and the existing password** through PUT /users/:id/password; PATCH /users/:id rejects password changes for both user and admin. User directory GET /users requires admin, and GET /users/:id is self/admin only. User deletion is admin-only. Role changes invalidate access tokens with the old role claim. Admin accounts must already exist in the database or be provisioned out-of-band; there is no public bootstrap-admin endpoint.
+
+Categories and Products mutations and product-image changes are admin-only; Inventory PATCH is admin-only. Their public read routes are preserved for storefront browsing. Address creation requires a current bearer-authenticated actor and matching userId unless admin; listing all addresses is admin-only, and by-id reads/updates/deletions require owner/admin. Address userId reassignment through PATCH is forbidden (including by admin); the existing at-least-one-address deletion rule remains. GET /addresses/user and all Cart /user endpoints keep the existing refresh-cookie interface but verify signature **and** current user/role/active account **and** the backing unexpired UserToken row; logout/logout-all immediately revokes these routes, even while the JWT signature remains valid. /sessions/refresh uses this same validation.
+
+The deliberate dummy-customer-login endpoint and its known test account credentials are **unchanged by this security hardening**. It remains a development/testing feature and must not be exposed as a real customer authentication flow in production.
 
 ## General contracts
 

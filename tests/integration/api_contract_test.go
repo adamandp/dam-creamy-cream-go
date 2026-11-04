@@ -107,28 +107,28 @@ func TestFirstPassHTTPContractsOnPrismaSchema(t *testing.T) {
 	session := sessions.NewService(tx, "access-secret-fixture", "refresh-secret-fixture")
 	fake := stubImageStore{}
 	roles.NewService(tx, session).Routes(app)
-	categories.NewService(tx, redis.NewClient(&redis.Options{Addr: "127.0.0.1:0"})).Routes(app)
-	products.NewService(tx, fake).Routes(app)
+	categories.NewService(tx, redis.NewClient(&redis.Options{Addr: "127.0.0.1:0"}), session).Routes(app)
+	products.NewService(tx, fake, session).Routes(app)
 	users.NewService(tx, session, fake).Routes(app)
 	addresses.NewService(tx, session).Routes(app)
 	carts.NewService(tx, session).Routes(app)
-	inventory.NewService(tx).Routes(app)
+	inventory.NewService(tx, session).Routes(app)
 	auth.NewService(tx, session, false).Routes(app)
 	session.Routes(app)
 
 	// Roles only enforce Zod string length, unlike category baseName.
 	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/roles", `{"name":"OPS_2026"}`, "", 201))
-	testBody(t, testCall(t, app, "POST", "/categories", `{"name":"Ice Cream","description":null}`, "", 400))
-	testBody(t, testCall(t, app, "POST", "/categories", `{"name":"123","description":null,"isActive":true}`, "", 400))
-	testBody(t, testCall(t, app, "POST", "/categories", `{"name":"Ice Cream","description":null,"isActive":true}`, "", 201))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/categories", `{"name":"Ice Cream","description":null}`, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/categories", `{"name":"123","description":null,"isActive":true}`, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/categories", `{"name":"Ice Cream","description":null,"isActive":true}`, "", 201))
 	var category domain.Category
 	if err := tx.Where("name = ?", "Ice Cream").First(&category).Error; err != nil {
 		t.Fatal(err)
 	}
 	invalidProduct := fmt.Sprintf(`{"categoryId":%q,"name":"Vanilla","price":12000,"isActive":true}`, category.ID.ID)
-	testBody(t, testCall(t, app, "POST", "/products", invalidProduct, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/products", invalidProduct, "", 400))
 	validProduct := fmt.Sprintf(`{"categoryId":%q,"name":"Vanilla","description":null,"price":12000,"isActive":true}`, category.ID.ID)
-	testBody(t, testCall(t, app, "POST", "/products", validProduct, "", 201))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/products", validProduct, "", 201))
 	var product domain.Product
 	if err := tx.Where("name = ?", "Vanilla").First(&product).Error; err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func TestFirstPassHTTPContractsOnPrismaSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	testBody(t, testCall(t, app, "GET", "/inventory/product/"+product.ID.ID, "", "", 200))
-	testBody(t, testCall(t, app, "PATCH", "/inventory/"+inv.ID.ID, `{"quantity":20}`, "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/inventory/"+inv.ID.ID, `{"quantity":20}`, "", 200))
 
 	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/users/"+user.ID.ID, `{"fullName":"Dummy User"}`, "", 400))
 	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/users/"+user.ID.ID, `{"email":"invalid"}`, "", 400))
@@ -161,6 +161,8 @@ func TestFirstPassHTTPContractsOnPrismaSchema(t *testing.T) {
 	if payload["data"] == nil || cookie == "" {
 		t.Fatalf("missing access token or refresh cookie: %v", payload)
 	}
+	customerAccess := payload["data"].(map[string]any)["accessToken"].(string)
+
 	testBody(t, testCall(t, app, "POST", "/sessions/refresh", "", cookie, 201))
 	unauthorized := testBody(t, testCall(t, app, "GET", "/addresses/user", "", "", 401))
 	if unauthorized["message"] != "🚪 You are not logged in. Please sign in to continue! 🔐" {
@@ -169,7 +171,7 @@ func TestFirstPassHTTPContractsOnPrismaSchema(t *testing.T) {
 	testBody(t, testCall(t, app, "POST", "/auth/dummy-customer-login", "", cookie, 403))
 
 	addr := fmt.Sprintf(`{"userId":%q,"recipientName":"Jane Doe","recipientPhoneNumber":"081234567890","province":"West Java","city":"Bandung","subdistrict":"Cicendo","village":"Pajajaran","postalCode":"40172","address":"Jalan Merdeka","isPrimary":false}`, user.ID.ID)
-	testBody(t, testCall(t, app, "POST", "/addresses", addr, "", 201))
+	testBody(t, testCallAs(t, app, customerAccess, "POST", "/addresses", addr, "", 201))
 	var primary domain.Address
 	if err := tx.Where("user_id = ?", user.ID.ID).First(&primary).Error; err != nil {
 		t.Fatal(err)
@@ -200,6 +202,8 @@ func TestFirstPassHTTPContractsOnPrismaSchema(t *testing.T) {
 	_ = invalidLogout.Body.Close()
 	testBody(t, testCall(t, app, "POST", "/auth/logout", "", cookie, 201))
 	testBody(t, testCall(t, app, "POST", "/sessions/refresh", "", cookie, 401))
+	testBody(t, testCall(t, app, "GET", "/addresses/user", "", cookie, 401))
+	testBody(t, testCall(t, app, "GET", "/carts/user", "", cookie, 401))
 	newLogin := testCall(t, app, "POST", "/auth/dummy-customer-login", "", "", 201)
 	newCookie := newLogin.Header.Get("Set-Cookie")
 	testBody(t, newLogin)

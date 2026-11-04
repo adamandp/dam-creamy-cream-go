@@ -27,3 +27,7 @@ The existing Prisma migration creates timestamp-without-time-zone columns. The G
 The User Vouchers feature resolves JWT bearer claims into the current, active PostgreSQL user and role on each request. Customers may claim/read only their own vouchers, while global listings and USED transitions require an admin role. The authorization code lives in the feature module, not a duplicate database connector.
 
 Authorization is implemented in the shared sessions service (Actor/RequireActor/RequireAdmin/RequireSelfOrAdmin), which checks current active database user and role against signed access JWT claims. Roles, Users, and Promotions use this shared check; User Vouchers also serialize eligibility checks and claim insertion inside a PostgreSQL FOR UPDATE transaction. No schema migration is performed.
+
+## Inherited route security after PR #2 hardening
+
+The shared sessions service owns JWT verification and active refresh-cookie session validation. When a handler uses \`CookieUser\`, it now checks the signed refresh token, its backing UserToken database row, account active state and role, so logout revocation applies immediately to cookie-based Cart and address reads. Access-token middleware independently verifies current user and role. Admin-only mutations protect catalog/category/stock and promotions; addresses are owner-scoped; user list and detail are access controlled. The dummy login is intentionally preserved as a dev/test fixture.
