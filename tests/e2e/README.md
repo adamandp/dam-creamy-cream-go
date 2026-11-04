@@ -25,17 +25,20 @@ The runner creates isolated Docker containers, applies the five real Prisma migr
 
 ## Acceptance criteria
 
-**19 total requests:** 11 GET and 8 write methods. The baseline is the original NestJS backend's actual HTTP responses.
+The original suite contains **19 requests: 11 GET and 8 mutations**. The improved Go implementation matches **15** exactly (HTTP status and parsed JSON) and intentionally differs in **4** documented source defects or ACL changes:
 
-- **18 requests must have equal status code and parsed JSON.** Includes list pagination, detail/association responses, voucher claims and updates.
-- **1 intentional exception:** `GET /user-vouchers/user`. NestJS declares `@Get(':id')` above `@Get('/user')`, causing the literal path to hit the UUID parser and return HTTP 400 (`Validation failed (uuid is expected)`). Go correctly registers `/user` before `/:id` and returns HTTP 200 with the authenticated user's voucher list. The comparison explicitly asserts the NestJS bug and the corrected Go behavior.
-- **Zero untracked mismatches.** Any other difference or a change to the expected route behavior makes the comparison exit nonzero.
+1. GET /product-discounts: totalItems now counts product discount records, not users.
+2. GET /user-vouchers: non-admin customers receive 403 instead of seeing everyone's claims.
+3. GET /user-vouchers/voucher/:id: non-admin customers receive 403.
+4. GET /user-vouchers/user: Go returns the intended 200 + associated vouchers; NestJS mistakenly routes /user through /:id and returns 400.
 
-A passing result must end with:
+The runner then probes **additional regression cases**: Zod-style pagination with decimal/scientific representations, invalid parameters, exact validation JSON, camelCase no-change messages, repeated date updates, fractional numbers stored in PostgreSQL Int columns, verified admin and owner access, unauthorized claims/status transitions, and FK/route errors. Normalized post-write comparisons also assert business fields and UTC createdAt/updatedAt timestamps agree within 10 seconds despite independent generated UUIDs.
 
-```text
-EXACT=18; INTENTIONAL_ROUTE_FIX=1; UNEXPECTED_DIFFERENCES=0
-PARITY AUDIT PASSED: 18 exact; 1 documented intentional NestJS routing bug fix
-```
+A passing run reports, at minimum:
 
-This is targeted PR #2 acceptance, **not** evidence that every edge case or unported module is 1:1. Go-only unit and integration tests are run by GitHub Actions; this side-by-side comparison requires the original NestJS source checkout and is executed separately.
+    BASELINE=19; MATCH=34; APPROVED_CHANGES=10; UNEXPECTED=0
+    PARITY AUDIT PASSED — all listed source deviations are intentional and verified
+
+All differences not explicitly allowlisted are errors; the test exits nonzero. Some approved errors intentionally differ semantically (Go uses 409 for FK conflicts and 400 for malformed path UUIDs instead of legacy 500).
+
+The suite starts both servers and database/storage/cache services using **disposable** fixtures and cleans up resources. It does not check out NestJS in GitHub Actions, so run this separately with the original NestJS repository. The CI workflow covers Go unit tests and real PostgreSQL/Redis/MinIO integration tests; it does not claim full app/checkout parity.

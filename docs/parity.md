@@ -44,7 +44,7 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 
 - Current-user cookie is JWT-verified instead of decoded without signature verification.
 - Refresh endpoint issues an access JWT using access secret, correcting a likely NestJS mistake.
-- Body validation is hand-written rather than a complete port of each Zod schema; error messages and nullable-field handling are not guaranteed identical.
+- PR #1 DTO validation is hand-written and not exhaustively verified. PR #2 Promotions DTOs now implement Zod-shaped validation errors on covered cases, including nullability and field-specific paths.
 - Cloudinary is replaced with MinIO per request. The public image URLs now point to the Go /media route; existing Cloudinary URLs remain stored and untouched. MinIO upload/read/delete and image HTTP/database integration tests now run in CI against disposable services.
 - GORM model relationship tags for association preloading are not yet exhaustive; query implementations use explicit joins where required.
 - Role pagination keeps the original `Category retrieved` response message from `roles.service.ts`, even though it looks incorrect.
@@ -62,15 +62,16 @@ No unimplemented business logic is represented as complete.
 - Prisma enum for gender is MALE/FEMALE/OTHER, while NestJS Zod allows MAN/WOMAN/OTHER. The Go port accepts MAN/WOMAN as in the NestJS DTO and writes the correct enum without changing the database.
 - Remaining unported domains and full server-to-server replay remain necessary before production cutover. CI success alone does not establish parity for unported modules.
 
-## PR #2 — Promotions: explicit NestJS/Go parity result (2026-11-04)
+## PR #2 — Promotions: approved Go/NestJS compatibility decisions (2026-11-04)
 
-Replayed 19 HTTP requests against **two separately seeded disposable databases** using running NestJS and Go servers (11 GET and 8 mutations).
+The side-by-side harness runs the original NestJS and Go services with separately seeded disposable PostgreSQL databases created from the original five Prisma migrations. See tests/e2e/README.md.
 
-- **18/19** had identical HTTP statuses and JSON responses.
-- **1/19 deliberate correction:** `GET /user-vouchers/user` is declared after `GET /user-vouchers/:id` in the NestJS controller. Its Express router treats `user` as the UUID parameter and responds `400 Validation failed (uuid is expected)`. The Go route is registered *before* `/:id`, returning `200` and the authenticated user's voucher assignments as the endpoint was intended to do.
-- This is an **intentional bug fix**, not evidence of strict 19/19 equality. Do not change the Go route back to a broken 400 response solely to obtain byte-for-byte parity.
-- The test records the route exception explicitly and fails on any *other* mismatch. Reproduce with `tests/e2e/run_compare.sh`; see `tests/e2e/README.md`.
-- CI checks Go module integration using disposable PostgreSQL, Redis and MinIO. The side-by-side NestJS comparison is run separately because it requires a checkout of the original NestJS repository.
-- Full end-to-end business parity for unported modules, including checkout, is deferred until those modules exist in Go.
+- **Original 19 HTTP routes/requests: 15 exact matches and 4 documented improvements.** NestJS source routes and responses are treated as the baseline, except where an explicit Go bug/security correction was approved.
+- Four baseline corrections: (1) GET /user-vouchers/user returns real data (the source mistakenly routes /user through /:id and returns 400); (2) GET /user-vouchers and (3) GET /user-vouchers/voucher/:id reject non-admins with 403; and (4) GET /product-discounts counts actual ProductDiscount rows rather than all User rows.
+- Additional compared cases cover customer ownership, forbidden status transitions, anonymous access, body-vs-param UUID validation, fractional Prisma Int columns, Zod numeric/date coercion, exact Zod error structure on tested inputs, original camelCase update error keys, safe foreign-key status 409, and malformed Product Discount path parameters returning 400 rather than internal 500.
+- After writes, a comparator normalizes naturally generated UUIDs/subsecond timings while requiring every stable field to match and timestamps on both servers to agree within 10 seconds. Go now writes UTC through GORM NowFunc and explicit session/cart clock assignments to avoid a 7-hour offset in the existing PostgreSQL TIMESTAMP(3) schema.
+- All user-voucher routes now require verified JWT bearer tokens and an active user/role in the current database. Customers can claim for themselves and read their own claims; all-user listings and USED transitions are admin-only. This is an intentional improvement over NestJS legacy endpoints.
+- GitHub Actions validates Go unit and real PostgreSQL/Redis/MinIO integration tests. NestJS-vs-Go comparison requires a separate NestJS checkout and is reproducible locally using the runner.
+- **No automatic migration, schema change, or production DB data modification.**
 
-**Ported in PR #2:** Discounts (CRUD/hard delete), Product Discounts (assign/lookup/soft-disable), Vouchers (CRUD/soft-disable), User Vouchers (claim/query/mark USED). All existing SQL tables are reused; no application migrations run.
+**PR #2 is the Promotions feature batch**, not full application parity. Orders/checkout, Payments, Shipments, Reviews, Recommendations, Analytics and Notifications remain unported. Uncovered edge cases may exist; treat CI success as evidence for tested behavior only.

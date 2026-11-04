@@ -10,7 +10,7 @@ import (
 )
 
 func NewPostgres(ctx context.Context, dsn string) (*gorm.DB, error) {
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Warn), DisableAutomaticPing: true})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Warn), DisableAutomaticPing: true, NowFunc: func() time.Time { return time.Now().UTC() }})
 	if err != nil {
 		return nil, err
 	}

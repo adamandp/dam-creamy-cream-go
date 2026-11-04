@@ -7,6 +7,7 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
+	"strings"
 )
 
 type Service struct {
@@ -18,8 +19,43 @@ func NewService(db *gorm.DB, sessions *sessions.Service) *Service {
 	return &Service{db: db, sessions: sessions}
 }
 
+// An actor is resolved from a signed JWT and the CURRENT database role.
+type actor struct {
+	UserID string
+	Admin  bool
+}
+
+func (s *Service) requireActor(c fiber.Ctx) error {
+	claims, err := s.sessions.AccessFor(c)
+	if err != nil {
+		return httpx.Unauthorized()
+	}
+	var user domain.User
+	if err := s.db.First(&user, "id = ?", claims.Subject).Error; err != nil || !user.IsActive || user.RoleID != claims.Role {
+		return httpx.Unauthorized()
+	}
+	var role domain.Role
+	if err := s.db.First(&role, "id = ?", user.RoleID).Error; err != nil {
+		return httpx.Unauthorized()
+	}
+	name := strings.ToLower(strings.TrimSpace(role.Name))
+	isAdmin := name == "admin" || name == "administrator" || name == "super admin" || name == "superadmin"
+	c.Locals("userVoucherActor", actor{UserID: user.ID.ID, Admin: isAdmin})
+	return c.Next()
+}
+func currentActor(c fiber.Ctx) actor {
+	return c.Locals("userVoucherActor").(actor)
+}
+func requireAdmin(c fiber.Ctx) error {
+	if !currentActor(c).Admin {
+		return httpx.Forbidden()
+	}
+	return nil
+}
+
 func (s *Service) Routes(app fiber.Router) {
 	r := app.Group("/user-vouchers")
+	r.Use(s.requireActor)
 	r.Post("/", s.create)
 	r.Get("/", s.findAll)
 	r.Get("/user", s.byUser)
@@ -36,6 +72,9 @@ type CreateInput struct {
 }
 
 func (s *Service) create(c fiber.Ctx) error {
+	if err := promotionutil.ValidateFields(c, promotionutil.UserVoucherFields(), false); err != nil {
+		return err
+	}
 	var body CreateInput
 	if err := httpx.Bind(c, &body); err != nil {
 		return err
@@ -43,11 +82,9 @@ func (s *Service) create(c fiber.Ctx) error {
 	if err := promotionutil.Required(c, "userId", "voucherId", "claimedAt", "expiredAt"); err != nil {
 		return err
 	}
-	if err := httpx.UUID(body.UserID); err != nil {
-		return err
-	}
-	if err := httpx.UUID(body.VoucherID); err != nil {
-		return err
+	who := currentActor(c)
+	if !who.Admin && who.UserID != body.UserID {
+		return httpx.Forbidden()
 	}
 	var user domain.User
 	if err := s.db.First(&user, "id = ?", body.UserID).Error; err != nil {
@@ -69,6 +106,9 @@ func (s *Service) create(c fiber.Ctx) error {
 }
 
 func (s *Service) findAll(c fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
 	page, limit, err := httpx.Page(c)
 	if err != nil {
 		return err
@@ -100,6 +140,10 @@ func (s *Service) byID(c fiber.Ctx) error {
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
 		return err
 	}
+	who := currentActor(c)
+	if !who.Admin && who.UserID != m.UserID {
+		return httpx.Forbidden()
+	}
 	view, err := promotionutil.AsView(m)
 	if err != nil {
 		return err
@@ -108,6 +152,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 }
 
 func (s *Service) byVoucher(c fiber.Ctx) error {
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
 		return err
@@ -124,12 +171,9 @@ func (s *Service) byVoucher(c fiber.Ctx) error {
 }
 
 func (s *Service) byUser(c fiber.Ctx) error {
-	claims, err := s.sessions.AccessFor(c)
-	if err != nil {
-		return httpx.Unauthorized()
-	}
+	who := currentActor(c)
 	var assignments []domain.UserVoucher
-	if err := s.db.Where("user_id = ?", claims.Subject).Find(&assignments).Error; err != nil {
+	if err := s.db.Where("user_id = ?", who.UserID).Find(&assignments).Error; err != nil {
 		return err
 	}
 	// Avoid changing the default UserVoucher JSON shape on the other routes.
@@ -165,6 +209,11 @@ func (s *Service) byUser(c fiber.Ctx) error {
 }
 
 func (s *Service) use(c fiber.Ctx) error {
+	// Customers must not mark claims USED arbitrarily: checkout (when ported)
+	// or authorized administrators perform the state transition.
+	if err := requireAdmin(c); err != nil {
+		return err
+	}
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
 		return err

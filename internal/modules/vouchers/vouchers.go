@@ -35,13 +35,13 @@ type CreateInput struct {
 	Group           string             `json:"group"`
 	Value           *float64           `json:"value"`
 	ProductID       *string            `json:"productId"`
-	Quantity        *int               `json:"quantity"`
+	Quantity        *float64           `json:"quantity"`
 	MinimumPurchase float64            `json:"minimumPurchase"`
 	IsActive        *bool              `json:"isActive"`
 	StartDate       promotionutil.Date `json:"startDate"`
 	EndDate         promotionutil.Date `json:"endDate"`
-	MaxRedeemed     int                `json:"maxRedeemed"`
-	RedeemedCount   int                `json:"redeemedCount"`
+	MaxRedeemed     float64            `json:"maxRedeemed"`
+	RedeemedCount   float64            `json:"redeemedCount"`
 }
 
 func validate(b CreateInput) error {
@@ -62,15 +62,14 @@ func validate(b CreateInput) error {
 	if err := promotionutil.Enum(b.Group, "Group", "CHECKOUT", "SHIPPING"); err != nil {
 		return err
 	}
-	if b.ProductID != nil {
-		if err := httpx.UUID(*b.ProductID); err != nil {
-			return err
-		}
-	}
+
 	return nil
 }
 
 func (s *Service) create(c fiber.Ctx) error {
+	if err := promotionutil.ValidateFields(c, promotionutil.VoucherFields(), false); err != nil {
+		return err
+	}
 	var body CreateInput
 	if err := httpx.Bind(c, &body); err != nil {
 		return err
@@ -90,9 +89,9 @@ func (s *Service) create(c fiber.Ctx) error {
 	m := domain.Voucher{
 		Code: body.Code, Name: body.Name, Description: body.Description, Type: body.Type,
 		Group: body.Group, Value: body.Value, ProductID: body.ProductID,
-		Quantity: body.Quantity, MinimumPurchase: body.MinimumPurchase,
+		Quantity: promotionutil.NullableInteger(body.Quantity), MinimumPurchase: body.MinimumPurchase,
 		IsActive: *body.IsActive, StartDate: body.StartDate.Time, EndDate: body.EndDate.Time,
-		MaxRedeemed: body.MaxRedeemed, RedeemedCount: body.RedeemedCount,
+		MaxRedeemed: promotionutil.Integer(body.MaxRedeemed), RedeemedCount: promotionutil.Integer(body.RedeemedCount),
 	}
 	if err := s.db.Create(&m).Error; err != nil {
 		return err
@@ -145,6 +144,9 @@ func (s *Service) update(c fiber.Ctx) error {
 	}
 	var m domain.Voucher
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
+		return err
+	}
+	if err := promotionutil.ValidateFields(c, promotionutil.VoucherFields(), true); err != nil {
 		return err
 	}
 	fields, err := promotionutil.BodyFields(c, inputFields...)
@@ -220,11 +222,11 @@ func (s *Service) update(c fiber.Ctx) error {
 			}
 			updates["product_id"] = value
 		case "quantity":
-			value, err := promotionutil.Nullable[int](raw)
+			value, err := promotionutil.Nullable[float64](raw)
 			if err != nil {
 				return err
 			}
-			updates["quantity"] = promotionutil.NullInt(value)
+			updates["quantity"] = promotionutil.NullInt(promotionutil.NullableInteger(value))
 		case "minimumPurchase":
 			value, err := promotionutil.Value[float64](raw)
 			if err != nil {
@@ -238,14 +240,14 @@ func (s *Service) update(c fiber.Ctx) error {
 			}
 			updates["is_active"] = value
 		case "maxRedeemed", "redeemedCount":
-			value, err := promotionutil.Value[int](raw)
+			value, err := promotionutil.Value[float64](raw)
 			if err != nil {
 				return err
 			}
 			if key == "maxRedeemed" {
-				updates["max_redeemed"] = value
+				updates["max_redeemed"] = promotionutil.Integer(value)
 			} else {
-				updates["redeemed_count"] = value
+				updates["redeemed_count"] = promotionutil.Integer(value)
 			}
 		case "startDate", "endDate":
 			date, err := promotionutil.OptionalDate(raw)
@@ -259,7 +261,7 @@ func (s *Service) update(c fiber.Ctx) error {
 			}
 		}
 	}
-	if err := httpx.ValidateUpdate(old, updates); err != nil {
+	if err := promotionutil.ValidateUpdateFields(old, updates, promotionutil.VoucherFields()...); err != nil {
 		return err
 	}
 	if err := s.db.Model(&m).Updates(updates).Error; err != nil {

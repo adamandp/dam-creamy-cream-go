@@ -76,7 +76,7 @@ func (s *Service) add(c fiber.Ctx) error {
 			return err
 		}
 		item := domain.CartItem{CartID: cart.ID.ID, ProductID: body.ProductID, Quantity: body.Quantity}
-		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "cart_id"}, {Name: "product_id"}}, DoUpdates: clause.Assignments(map[string]any{"quantity": gorm.Expr("cart_items.quantity + EXCLUDED.quantity"), "updated_at": time.Now()})}).Create(&item).Error
+		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "cart_id"}, {Name: "product_id"}}, DoUpdates: clause.Assignments(map[string]any{"quantity": gorm.Expr("cart_items.quantity + EXCLUDED.quantity"), "updated_at": time.Now().UTC()})}).Create(&item).Error
 	})
 	if err != nil {
 		return err
@@ -169,7 +169,7 @@ func (s *Service) byUser(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	for _, r := range rows {
 		item := CartResponse{ID: r.ProductID, Name: r.Name, ImageURL: r.ImageURL, Category: r.Category, Price: r.Price, Qty: r.Quantity}
 		if r.DiscountType != nil && r.DiscountValue != nil && r.StartDate != nil && r.EndDate != nil && !r.StartDate.After(now) && !r.EndDate.Before(now) {

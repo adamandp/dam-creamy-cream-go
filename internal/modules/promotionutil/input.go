@@ -78,9 +78,32 @@ func ParseDate(raw []byte) (time.Time, error) {
 		if value == "" {
 			return time.Time{}, fmt.Errorf("invalid date")
 		}
-		for _, layout := range []string{time.RFC3339Nano, "2006-01-02", "2006-01-02T15:04:05", time.RFC1123, time.RFC1123Z} {
+		for _, layout := range []string{time.RFC3339Nano, "2006-01-02", time.RFC1123, time.RFC1123Z} {
 			if parsed, err := time.Parse(layout, value); err == nil {
 				return parsed.UTC(), nil
+			}
+		}
+		// Node's new Date(ISO-local-datetime) uses the server's local
+		// timezone. ISO date-only uses UTC by JavaScript specification.
+		for _, layout := range []string{
+			"2006-01-02T15:04:05", "2006-01-02T15:04:05.000",
+			"2006-01-02T15:04:05.999999999", "2006-01-02T15:04",
+			"2006-01-02 15:04:05", "2006/01/02", "2006/01/02 15:04:05",
+		} {
+			if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+				return parsed.UTC(), nil
+			}
+		}
+		// Date("0") / Date("1".."12") are valid JS date coercions.
+		if n, err := strconv.Atoi(value); err == nil && len(value) <= 2 {
+			if n == 0 {
+				return time.Date(2000, 1, 1, 0, 0, 0, 0, time.Local).UTC(), nil
+			}
+			if n >= 1 && n <= 12 {
+				return time.Date(2001, time.Month(n), 1, 0, 0, 0, 0, time.Local).UTC(), nil
+			}
+			if n >= 50 && n <= 99 {
+				return time.Date(1900+n, 1, 1, 0, 0, 0, 0, time.Local).UTC(), nil
 			}
 		}
 		if epoch, err := strconv.ParseInt(value, 10, 64); err == nil && len(value) >= 12 {
@@ -157,7 +180,7 @@ func NullableUUID(raw json.RawMessage, field string) (any, error) {
 	if val == nil {
 		return nil, nil
 	}
-	if err := httpx.UUID(*val); err != nil {
+	if !uuidZod.MatchString(*val) {
 		return nil, fiber.NewError(400, fmt.Sprintf("Invalid %s", field))
 	}
 	return *val, nil
@@ -217,4 +240,16 @@ func AsViews[T any](models []T) ([]map[string]any, error) {
 		items = append(items, view)
 	}
 	return items, nil
+}
+
+// The legacy Prisma client accepts JSON floating-point values for Int
+// fields and stores their integer part (1.5 -> 1). Match that behavior
+// explicitly at the domain boundary.
+func Integer(value float64) int { return int(value) }
+func NullableInteger(value *float64) *int {
+	if value == nil {
+		return nil
+	}
+	n := Integer(*value)
+	return &n
 }

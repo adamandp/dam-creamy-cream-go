@@ -14,3 +14,12 @@ INSERT INTO vouchers (id,code,name,description,type,"group",value,product_id,qua
 VALUES ('77777777-7777-4777-8777-777777777777','WELCOME20','Welcome Deal',NULL,'PERCENTAGE','CHECKOUT',20,NULL,NULL,50000,true,'2026-01-01 00:00:00+00','2027-01-01 00:00:00+00',100,0,'2026-01-01 00:00:00+00','2026-01-01 00:00:00+00');
 INSERT INTO user_vouchers (id,user_id,voucher_id,status,claimed_at,expired_at,created_at,updated_at)
 VALUES ('88888888-8888-4888-8888-888888888888','22222222-2222-4222-8222-222222222222','77777777-7777-4777-8777-777777777777','CLAIMED','2026-01-01 00:00:00+00','2027-01-01 00:00:00+00','2026-01-01 00:00:00+00','2026-01-01 00:00:00+00');
+
+-- Deliberately add unrelated users. The NestJS Product Discounts list counts
+-- users, whereas the corrected Go endpoint counts product discount records.
+INSERT INTO roles(id,name,created_at,updated_at)
+VALUES ('99999999-9999-4999-8999-999999999999','Admin','2026-01-01 00:00:00+00','2026-01-01 00:00:00+00');
+INSERT INTO users(id,role_id,username,password,full_name,is_active,created_at,updated_at)
+VALUES
+('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','99999999-9999-4999-8999-999999999999','ParityAdmin','fixture-not-a-login','Parity Admin',true,'2026-01-01 00:00:00+00','2026-01-01 00:00:00+00'),
+('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','11111111-1111-4111-8111-111111111111','ParityOther','fixture-not-a-login','Parity Other',true,'2026-01-01 00:00:00+00','2026-01-01 00:00:00+00');

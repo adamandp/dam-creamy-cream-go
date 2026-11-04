@@ -41,7 +41,7 @@ Discount types: PERCENTAGE, FIXED, PRICE, FREE_ITEM. Nullable discount values, d
 | GET | /product-discounts/product/:productId | List by product |
 | DELETE | /product-discounts/:id | Set isActive=false |
 
-Product discount assignments have one row per product (unique product ID). Disabled assignments remain queryable. The list totalItems currently counts user records.
+Product discount assignments have one row per product (unique product ID). Disabled assignments remain queryable. The list totalItems counts product-discount rows (fixing the NestJS bug that counted users).
 
 ## Vouchers
 
@@ -59,18 +59,18 @@ Voucher types: PERCENTAGE, FIXED and FREE_ITEM. Groups: CHECKOUT and SHIPPING. S
 
 | Method | Path | Behavior |
 |---|---|---|
-| POST | /user-vouchers | Create a user claim |
-| GET | /user-vouchers | Paginated list |
-| GET | /user-vouchers/user | List current user's claims; Bearer token |
-| GET | /user-vouchers/voucher/:id | Claims by voucher |
-| GET | /user-vouchers/:id | Get claim |
-| PATCH | /user-vouchers/:id | Set status to USED |
+| POST | /user-vouchers | Bearer JWT; customer may claim for self, admin may assign |
+| GET | /user-vouchers | Bearer JWT; admin only, paginated |
+| GET | /user-vouchers/user | Bearer JWT; current user's own claims |
+| GET | /user-vouchers/voucher/:id | Bearer JWT; admin only |
+| GET | /user-vouchers/:id | Bearer JWT; owner or admin only |
+| PATCH | /user-vouchers/:id | Bearer JWT; admin only, marks USED |
 
-Claims start as CLAIMED. The /user endpoint returns each claim with a full associated voucher in its vouchers field. The use endpoint sets USED without checking expiration or redemption count.
+Claims start as CLAIMED. The /user endpoint returns each claim with its associated voucher under the vouchers property. The use endpoint marks USED without evaluating expiration/redemption limits (checkout transaction logic remains unported). Access JWTs are signature-verified and checked against the CURRENT user, active flag and role in PostgreSQL. Admin/Administrator/Super Admin/Superadmin role names have elevated access (case-insensitive); customer access is owner-scoped.
 
 ## General contracts
 
 - Creation returns 201; read/update/delete returns 200 on success.
-- Validation errors return 400; missing rows 404; unique constraint conflicts 409.
+- Invalid DTO/parameter errors return 400; promotion DTOs provide source-compatible Zod errors[]; missing rows return 404; unique and foreign-key constraints return 409.
 - No-op updates are rejected on endpoints with an update guard.
-- Datetime fields are serialized as UTC ISO timestamps with milliseconds.
+- Datetime fields are serialized as UTC ISO timestamps with milliseconds. The GORM clock writes UTC even on non-UTC hosts, matching Prisma TIMESTAMP(3) columns.\n- Zod-style pagination accepts numeric notations such as page=1.0 and limit=1e1. Noncanonical URL UUIDs are rejected with 400.\n- Promotion DTO numeric fields accept fractions as source Zod does. Prisma-backed Int columns store the integer portion.\n- User-voucher ACL, product-discount counts and semantic database errors are approved legacy corrections.

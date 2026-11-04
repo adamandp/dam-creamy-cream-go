@@ -35,7 +35,7 @@ type Claims struct {
 }
 
 func (s *Service) sign(userID, roleID string, ttl time.Duration, secret []byte) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{Role: roleID, RegisteredClaims: jwt.RegisteredClaims{Subject: userID, IssuedAt: jwt.NewNumericDate(time.Now()), ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl))}})
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{Role: roleID, RegisteredClaims: jwt.RegisteredClaims{Subject: userID, IssuedAt: jwt.NewNumericDate(time.Now().UTC()), ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(ttl))}})
 	return token.SignedString(secret)
 }
 func (s *Service) parse(token string, secret []byte) (*Claims, error) {
@@ -75,7 +75,7 @@ func (s *Service) NewTokens(ctx context.Context, userID, roleID, existing, agent
 	if err != nil {
 		return Tokens{}, err
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	info, _ := json.Marshal(parseBrowserInfo(ip, "dummy-"+agent))
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if existing != "" {
@@ -101,7 +101,7 @@ func (s *Service) Refresh(ctx context.Context, token string) (string, error) {
 		return "", err
 	}
 	var count int64
-	if err := s.db.WithContext(ctx).Model(&domain.UserToken{}).Where("token = ? AND \"expiredAt\" > ?", token, time.Now()).Count(&count).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&domain.UserToken{}).Where("token = ? AND \"expiredAt\" > ?", token, time.Now().UTC()).Count(&count).Error; err != nil {
 		return "", err
 	}
 	if count == 0 {

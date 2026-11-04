@@ -27,17 +27,14 @@ type CreateInput struct {
 }
 
 func (s *Service) create(c fiber.Ctx) error {
+	if err := promotionutil.ValidateFields(c, promotionutil.ProductDiscountFields(), false); err != nil {
+		return err
+	}
 	var body CreateInput
 	if err := httpx.Bind(c, &body); err != nil {
 		return err
 	}
 	if err := promotionutil.Required(c, "productId", "discountId"); err != nil {
-		return err
-	}
-	if err := httpx.UUID(body.ProductID); err != nil {
-		return err
-	}
-	if err := httpx.UUID(body.DiscountID); err != nil {
 		return err
 	}
 	// Resolve both foreign keys before creating the association, in the
@@ -63,10 +60,9 @@ func (s *Service) findAll(c fiber.Ctx) error {
 		return err
 	}
 	var data []domain.ProductDiscount
-	// This endpoint's totalItems has always counted users; keep the current
-	// public pagination behavior until a separate, deliberate API version change.
+	// Count the actual product discounts, fixing legacy pagination.
 	var total int64
-	if err := s.db.Model(&domain.User{}).Count(&total).Error; err != nil {
+	if err := s.db.Model(&domain.ProductDiscount{}).Count(&total).Error; err != nil {
 		return err
 	}
 	if total == 0 {
@@ -83,6 +79,9 @@ func (s *Service) findAll(c fiber.Ctx) error {
 }
 
 func (s *Service) byID(c fiber.Ctx) error {
+	if err := httpx.UUID(c.Params("id")); err != nil {
+		return err
+	}
 	var m domain.ProductDiscount
 	if err := s.db.First(&m, "id = ?", c.Params("id")).Error; err != nil {
 		return err
@@ -95,6 +94,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 }
 
 func (s *Service) byProductID(c fiber.Ctx) error {
+	if err := httpx.UUID(c.Params("productId")); err != nil {
+		return err
+	}
 	var data []domain.ProductDiscount
 	if err := s.db.Where("product_id = ?", c.Params("productId")).Find(&data).Error; err != nil {
 		return err
@@ -107,6 +109,9 @@ func (s *Service) byProductID(c fiber.Ctx) error {
 }
 
 func (s *Service) remove(c fiber.Ctx) error {
+	if err := httpx.UUID(c.Params("id")); err != nil {
+		return err
+	}
 	result := s.db.Model(&domain.ProductDiscount{}).
 		Where("id = ?", c.Params("id")).Update("is_active", false)
 	if result.Error != nil {

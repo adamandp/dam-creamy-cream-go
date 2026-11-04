@@ -3,6 +3,8 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -34,6 +36,25 @@ func requiredRows(t *testing.T, result map[string]any) []any {
 	return rows
 }
 
+func promoAuthenticatedCall(t *testing.T, app *fiber.App, token, method, path, body string, expected int) *http.Response {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	response, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != expected {
+		defer response.Body.Close()
+		actual, _ := io.ReadAll(response.Body)
+		t.Fatalf("%s %s: got %d, want %d: %s", method, path, response.StatusCode, expected, actual)
+	}
+	return response
+}
+
 func TestPromotionsAPIOnPostgres(t *testing.T) {
 	db := connectPrismaFixture(t)
 	tx := db.Begin()
@@ -50,6 +71,14 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	if err := tx.Create(&user).Error; err != nil {
 		t.Fatal(err)
 	}
+	adminRole := domain.Role{Name: "Admin"}
+	if err := tx.Create(&adminRole).Error; err != nil {
+		t.Fatal(err)
+	}
+	admin := domain.User{RoleID: adminRole.ID.ID, Username: "PromoAdmin", FullName: "Promo Admin", Password: "test-only", IsActive: true}
+	if err := tx.Create(&admin).Error; err != nil {
+		t.Fatal(err)
+	}
 	category := domain.Category{Name: "Ice Cream", IsActive: true}
 	if err := tx.Create(&category).Error; err != nil {
 		t.Fatal(err)
@@ -60,6 +89,14 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	}
 
 	ses := sessions.NewService(tx, "promo-access-test-secret", "promo-refresh-test-secret")
+	userTokens, err := ses.NewTokens(context.Background(), user.ID.ID, role.ID.ID, "", "Integration", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminTokens, err := ses.NewTokens(context.Background(), admin.ID.ID, adminRole.ID.ID, "", "Integration", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
 	discounts.NewService(tx).Routes(app)
 	productdiscounts.NewService(tx).Routes(app)
@@ -132,7 +169,7 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	list := testBody(t, testCall(t, app, "GET", "/product-discounts", "", "", 200))
 	paging, ok := list["paging"].(map[string]any)
 	if !ok || paging["totalItems"] != float64(1) {
-		t.Fatalf("public product-discount totalItems must count users: %v", list)
+		t.Fatalf("product-discount totalItems must count product discounts: %v", list)
 	}
 	testBody(t, testCall(t, app, "GET", "/product-discounts/"+association.ID.ID, "", "", 200))
 	testBody(t, testCall(t, app, "DELETE", "/product-discounts/"+association.ID.ID, "", "", 200))
@@ -174,8 +211,11 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 
 	// Claims may be created even for a disabled voucher; the API does not
 	// reject them or evaluate time-window/redemption limits in this endpoint.
+	// No authentication must never allow creating or modifying claims.
+	testBody(t, testCall(t, app, "POST", "/user-vouchers", "{}", "", 401))
+	testBody(t, testCall(t, app, "GET", "/user-vouchers", "", "", 401))
 	claimBody := fmt.Sprintf(`{"userId":%q,"voucherId":%q,"claimedAt":"2026-01-01","expiredAt":"2027-01-01"}`, user.ID.ID, voucherID)
-	testBody(t, testCall(t, app, "POST", "/user-vouchers", claimBody, "", 201))
+	testBody(t, promoAuthenticatedCall(t, app, userTokens.AccessToken, "POST", "/user-vouchers", claimBody, 201))
 	var claim domain.UserVoucher
 	if err := tx.First(&claim, "user_id = ?", user.ID.ID).Error; err != nil {
 		t.Fatal(err)
@@ -183,20 +223,32 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	if claim.Status != "CLAIMED" {
 		t.Fatalf("new assignment status should be CLAIMED, got %q", claim.Status)
 	}
-	testBody(t, testCall(t, app, "GET", "/user-vouchers/"+claim.ID.ID, "", "", 200))
-	if len(requiredRows(t, testBody(t, testCall(t, app, "GET", "/user-vouchers/voucher/"+voucherID, "", "", 200)))) != 1 {
-		t.Fatal("voucher assignments should remain visible")
+	otherUser := domain.User{RoleID: role.ID.ID, Username: "PromoOther", FullName: "Promo Other", Password: "test-only", IsActive: true}
+	if err := tx.Create(&otherUser).Error; err != nil {
+		t.Fatal(err)
 	}
-	if len(requiredRows(t, testBody(t, testCall(t, app, "GET", "/user-vouchers", "", "", 200)))) != 1 {
-		t.Fatal("user voucher pagination should include one result")
-	}
-	testBody(t, testCall(t, app, "GET", "/user-vouchers/user", "", "", 401))
-	access, err := ses.NewTokens(context.Background(), user.ID.ID, role.ID.ID, "", "Go test", "127.0.0.1")
+	otherToken, err := ses.NewTokens(context.Background(), otherUser.ID.ID, role.ID.ID, "", "Integration", "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
+	testBody(t, promoAuthenticatedCall(t, app, otherToken.AccessToken, "GET", "/user-vouchers/"+claim.ID.ID, "", 403))
+	testBody(t, promoAuthenticatedCall(t, app, userTokens.AccessToken, "GET", "/user-vouchers/"+claim.ID.ID, "", 200))
+	if len(requiredRows(t, testBody(t, promoAuthenticatedCall(t, app, adminTokens.AccessToken, "GET", "/user-vouchers/voucher/"+voucherID, "", 200)))) != 1 {
+		t.Fatal("voucher assignments should remain visible")
+	}
+	if len(requiredRows(t, testBody(t, promoAuthenticatedCall(t, app, adminTokens.AccessToken, "GET", "/user-vouchers", "", 200)))) != 1 {
+		t.Fatal("user voucher pagination should include one result")
+	}
+	// Scope and role permissions must be enforced on every user-claim route.
+	testBody(t, promoAuthenticatedCall(t, app, userTokens.AccessToken, "GET", "/user-vouchers", "", 403))
+	testBody(t, promoAuthenticatedCall(t, app, userTokens.AccessToken, "GET", "/user-vouchers/voucher/"+voucherID, "", 403))
+	testBody(t, promoAuthenticatedCall(t, app, userTokens.AccessToken, "PATCH", "/user-vouchers/"+claim.ID.ID, "", 403))
+	testBody(t, testCall(t, app, "PATCH", "/user-vouchers/"+claim.ID.ID, "", "", 401))
+	testBody(t, promoAuthenticatedCall(t, app, userTokens.AccessToken, "POST", "/user-vouchers",
+		fmt.Sprintf("{\"userId\":%q,\"voucherId\":%q,\"claimedAt\":\"2026-01-01\",\"expiredAt\":\"2027-01-01\"}", admin.ID.ID, voucherID), 403))
+	testBody(t, testCall(t, app, "GET", "/user-vouchers/user", "", "", 401))
 	request := httptest.NewRequest("GET", "/user-vouchers/user", nil)
-	request.Header.Set("Authorization", "Bearer "+access.AccessToken)
+	request.Header.Set("Authorization", "Bearer "+userTokens.AccessToken)
 	response, err := app.Test(request)
 	if err != nil {
 		t.Fatal(err)
@@ -213,11 +265,38 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	if !ok || nested["id"] != voucherID || nested["code"] != "WELCOME20" {
 		t.Fatalf("nested voucher association missing: %+v", row)
 	}
-	testBody(t, testCall(t, app, "PATCH", "/user-vouchers/"+claim.ID.ID, "", "", 200))
-	testBody(t, testCall(t, app, "PATCH", "/user-vouchers/"+claim.ID.ID, "", "", 200))
+	testBody(t, promoAuthenticatedCall(t, app, adminTokens.AccessToken, "PATCH", "/user-vouchers/"+claim.ID.ID, "", 200))
+	testBody(t, promoAuthenticatedCall(t, app, adminTokens.AccessToken, "PATCH", "/user-vouchers/"+claim.ID.ID, "", 200))
 	if err := tx.First(&claim, "id = ?", claim.ID.ID).Error; err != nil || claim.Status != "USED" {
 		t.Fatalf("assignment must be USED after use: %+v %v", claim, err)
 	}
+
+	// The NestJS Zod DTO uses z.number(), not integer(), and Prisma stores
+	// the integer portion in the existing PostgreSQL Int columns.
+	fractionalDiscount := `{"name":"Fraction Deal","discountType":"PERCENTAGE","value":2,"maxApplied":1.5,"maxRedeemed":9,"redeemedCount":0,"description":null,"productId":null,"quantity":2.9,"startDate":"2026-01-01","endDate":"2027-01-01"}`
+	testBody(t, testCall(t, app, "POST", "/discounts", fractionalDiscount, "", 201))
+	var savedFraction domain.Discount
+	if err := tx.First(&savedFraction, "name = ?", "Fraction Deal").Error; err != nil {
+		t.Fatal(err)
+	}
+	if savedFraction.MaxApplied != 1 || savedFraction.Quantity == nil || *savedFraction.Quantity != 2 {
+		t.Fatalf("fractional input not persisted as Prisma does: %+v", savedFraction)
+	}
+	fractionalVoucher := `{"code":"FRACTION9","name":"Fraction Deal","description":null,"type":"PERCENTAGE","group":"CHECKOUT","value":2,"productId":null,"quantity":1.9,"minimumPurchase":100,"isActive":true,"startDate":"2026-01-01","endDate":"2027-01-01","maxRedeemed":1.5,"redeemedCount":0}`
+	testBody(t, testCall(t, app, "POST", "/vouchers", fractionalVoucher, "", 201))
+	var savedVoucher domain.Voucher
+	if err := tx.First(&savedVoucher, "code = ?", "FRACTION9").Error; err != nil {
+		t.Fatal(err)
+	}
+	if savedVoucher.MaxRedeemed != 1 || savedVoucher.Quantity == nil || *savedVoucher.Quantity != 1 {
+		t.Fatalf("fractional voucher input mismatch: %+v", savedVoucher)
+	}
+	// In NestJS, z.coerce.date always produces a new JS Date instance.
+	// Even the same instant is treated as an update by validateUpdate().
+	testBody(t, testCall(t, app, "PATCH", "/discounts/"+dID, `{"startDate":"2026-01-01T00:00:00.000Z"}`, "", 200))
+	testBody(t, testCall(t, app, "PATCH", "/vouchers/"+voucherID, `{"endDate":"2027-01-01T00:00:00.000Z"}`, "", 200))
+	testBody(t, testCall(t, app, "GET", "/discounts?page=1.0&limit=1e1", "", "", 200))
+	testBody(t, testCall(t, app, "GET", "/vouchers?page=1.0&limit=1e1", "", "", 200))
 
 	// Deleting a referenced discount follows the physical FK constraints.
 	// Discount removal is a hard delete, unlike voucher and association.
