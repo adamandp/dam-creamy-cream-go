@@ -1,1 +1,5 @@
-Run the original NestJS backend and the Fiber backend against disposable copies of the same seeded database, compare HTTP status codes, JSON bodies, cookies, database side effects, and error responses.
+# End-to-end testing
+
+Use this directory for application-wide HTTP acceptance tests. Test against an isolated PostgreSQL database and disposable Redis/MinIO resources.
+
+Unit tests are in tests/unit and integration tests are in tests/integration. CI starts separate services for the integration suite.

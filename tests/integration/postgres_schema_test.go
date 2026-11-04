@@ -17,8 +17,8 @@ import (
 	"gorm.io/gorm/schema"
 )
 
-// These tests run only on a throwaway PostgreSQL created from the source NestJS
-// project's real Prisma migration SQL. Never point TEST_DATABASE_URL at production.
+// These tests run only on an isolated PostgreSQL with the application schema.
+// Never point TEST_DATABASE_URL at production.
 func connectPrismaFixture(t *testing.T) *gorm.DB {
 	t.Helper()
 	if os.Getenv("PG_INTEGRATION") != "1" {
@@ -41,7 +41,7 @@ func connectPrismaFixture(t *testing.T) *gorm.DB {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	return db
 }
-func TestPrismaGORMColumnParity(t *testing.T) {
+func TestPostgresGORMColumnMapping(t *testing.T) {
 	db := connectPrismaFixture(t)
 	models := []any{
 		&domain.Role{}, &domain.User{}, &domain.UserToken{}, &domain.Address{}, &domain.Category{},

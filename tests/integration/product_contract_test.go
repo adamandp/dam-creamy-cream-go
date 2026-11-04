@@ -87,7 +87,7 @@ func TestCatalogAndProductInformationOnPrismaSchema(t *testing.T) {
 ⚡ Why Choose This Product?
 Great flavor`
 	if data["information"] != expected {
-		t.Errorf("product information builder differs from NestJS: %q", data["information"])
+		t.Errorf("product information differs from expected string: %q", data["information"])
 	}
 	// Query layer should not return inactive products.
 	if err := tx.Model(&product).Update("is_active", false).Error; err != nil {

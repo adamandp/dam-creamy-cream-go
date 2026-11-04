@@ -46,7 +46,7 @@ func (s *Service) clearCookie(c fiber.Ctx) {
 	c.Cookie(&fiber.Cookie{Name: "refreshToken", Value: "", HTTPOnly: true, Secure: s.production, SameSite: "Lax", Path: "/", Expires: time.Unix(0, 0)})
 }
 func (s *Service) logout(c fiber.Ctx) error {
-	// NestJS clears the browser cookie even when token revocation fails.
+	// Clear the browser cookie even when token revocation fails.
 	s.clearCookie(c)
 	if err := s.sessions.Logout(context.Background(), c.Cookies("refreshToken")); err != nil {
 		return err

@@ -1,5 +1,5 @@
-// Package domain defines GORM representations of the *existing* Prisma schema.
-// No migrations or schema creation is performed by this application.
+// Package domain defines GORM models for the Creamy Cream PostgreSQL schema.
+// The application does not change its database schema at startup.
 package domain
 
 import (

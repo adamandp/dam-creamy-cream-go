@@ -11,7 +11,7 @@ func TestPagination(t *testing.T) {
 		t.Fatalf("unexpected paging: %+v", p)
 	}
 }
-func TestMessageParity(t *testing.T) {
+func TestMessageContract(t *testing.T) {
 	got := httpx.Message("create", "Role")
 	want := "🎉 Role created successfully! Welcome aboard! 🚀"
 	if got != want {

@@ -1,0 +1,119 @@
+package productdiscounts
+
+import (
+	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
+	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/promotionutil"
+	"github.com/gofiber/fiber/v3"
+	"gorm.io/gorm"
+)
+
+type Service struct{ db *gorm.DB }
+
+func NewService(db *gorm.DB) *Service { return &Service{db: db} }
+
+func (s *Service) Routes(app fiber.Router) {
+	r := app.Group("/product-discounts")
+	r.Post("/", s.create)
+	r.Get("/", s.findAll)
+	r.Get("/product/:productId", s.byProductID)
+	r.Get("/:id", s.byID)
+	r.Delete("/:id", s.remove)
+}
+
+type CreateInput struct {
+	ProductID  string `json:"productId"`
+	DiscountID string `json:"discountId"`
+}
+
+func (s *Service) create(c fiber.Ctx) error {
+	var body CreateInput
+	if err := httpx.Bind(c, &body); err != nil {
+		return err
+	}
+	if err := promotionutil.Required(c, "productId", "discountId"); err != nil {
+		return err
+	}
+	if err := httpx.UUID(body.ProductID); err != nil {
+		return err
+	}
+	if err := httpx.UUID(body.DiscountID); err != nil {
+		return err
+	}
+	// Resolve both foreign keys before creating the association, in the
+	// same order as the existing public API.
+	var product domain.Product
+	if err := s.db.First(&product, "id = ?", body.ProductID).Error; err != nil {
+		return err
+	}
+	var discount domain.Discount
+	if err := s.db.First(&discount, "id = ?", body.DiscountID).Error; err != nil {
+		return err
+	}
+	m := domain.ProductDiscount{ProductID: body.ProductID, DiscountID: body.DiscountID, IsActive: true}
+	if err := s.db.Create(&m).Error; err != nil {
+		return err
+	}
+	return c.Status(201).JSON(httpx.Response{Message: httpx.Message("create", "Product Discount")})
+}
+
+func (s *Service) findAll(c fiber.Ctx) error {
+	page, limit, err := httpx.Page(c)
+	if err != nil {
+		return err
+	}
+	var data []domain.ProductDiscount
+	// This endpoint's totalItems has always counted users; keep the current
+	// public pagination behavior until a separate, deliberate API version change.
+	var total int64
+	if err := s.db.Model(&domain.User{}).Count(&total).Error; err != nil {
+		return err
+	}
+	if total == 0 {
+		return httpx.NotFound("Product Discount")
+	}
+	if err := s.db.Offset((page - 1) * limit).Limit(limit).Find(&data).Error; err != nil {
+		return err
+	}
+	mapped, err := promotionutil.AsViews(data)
+	if err != nil {
+		return err
+	}
+	return c.JSON(httpx.Response{Message: httpx.Message("get", "Product Discount"), Data: mapped, Paging: httpx.Pagination(page, limit, total)})
+}
+
+func (s *Service) byID(c fiber.Ctx) error {
+	var m domain.ProductDiscount
+	if err := s.db.First(&m, "id = ?", c.Params("id")).Error; err != nil {
+		return err
+	}
+	view, err := promotionutil.AsView(m)
+	if err != nil {
+		return err
+	}
+	return c.JSON(httpx.Response{Message: httpx.Message("get", "Product Discount"), Data: view})
+}
+
+func (s *Service) byProductID(c fiber.Ctx) error {
+	var data []domain.ProductDiscount
+	if err := s.db.Where("product_id = ?", c.Params("productId")).Find(&data).Error; err != nil {
+		return err
+	}
+	mapped, err := promotionutil.AsViews(data)
+	if err != nil {
+		return err
+	}
+	return c.JSON(httpx.Response{Message: httpx.Message("get", "Product Discount"), Data: mapped})
+}
+
+func (s *Service) remove(c fiber.Ctx) error {
+	result := s.db.Model(&domain.ProductDiscount{}).
+		Where("id = ?", c.Params("id")).Update("is_active", false)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return httpx.NotFound("Product Discount")
+	}
+	return c.JSON(httpx.Response{Message: httpx.Message("delete", "Product Discount")})
+}
