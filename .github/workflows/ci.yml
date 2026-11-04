@@ -2,6 +2,8 @@ name: Go CI
 on:
   push:
   pull_request:
+permissions:
+  contents: write
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -11,6 +13,27 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+      - name: Format Go code
+        run: find cmd internal tests -name '*.go' -print0 | xargs -0 gofmt -w
       - run: go mod tidy
+      - name: Commit go.sum and formatting to PR #1 branch
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feat/initial-go-fiber-gorm-port'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add go.mod go.sum cmd internal tests
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: persist Go module checksums and formatting"
+            git push
+          fi
       - run: go vet ./...
       - run: go test ./...
+      - name: MinIO integration test
+        run: |
+          docker run -d --name minio-test -p 9000:9000 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data --address :9000
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null
+          MINIO_INTEGRATION=1 go test ./tests/integration -count=1 -v
