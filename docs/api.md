@@ -16,8 +16,8 @@ All routes are relative to the backend root. List endpoints accept page (default
 | /product | Detail and product information |
 | /carts | Current-user cart read/add/remove via refresh cookie verified against active PostgreSQL session |
 | /inventory | Public read/lookup; admin-only PATCH with nonnegative quantity/reservedQuantity and reservedQuantity <= quantity, validated under a PostgreSQL row lock |
+| /orders | POST /checkout owner-authenticated; GET /orders admin-only; GET /user owner-only; GET /:id owner/admin |
 | /products/catalog, /product/:id | Public product pricing; applies discounts only when the product-discount assignment is active **and** the discount is within its inclusive start/end period |
-
 | /health | HTTP and PostgreSQL status |
 | /media/:scope/:id/:filename | Public image delivery from private storage |
 
@@ -76,7 +76,7 @@ Claims start as CLAIMED. To claim, send voucherId (userId is optional for a cust
 
 **Refresh JWT:** a random 128-bit base64url jti differentiates rapid or concurrent logins. The compact refresh JWT deliberately omits optional iat and typ fields to fit the existing Prisma user_tokens.token VARCHAR(255) column, while retaining the mandatory exp, HS256 signature and active database session checks. Access JWT format is unchanged. Dummy login credentials and behavior are unchanged.
 
-The /user endpoint returns each claim with its associated voucher under the vouchers property. The admin use endpoint marks USED; checkout transaction redemption and settlement are not ported yet. Access JWTs are signature-verified and checked against the CURRENT user, active flag and role in PostgreSQL. Admin/Administrator/Super Admin/Superadmin role names have elevated access (case-insensitive); customer access is owner-scoped. Read access to Discounts, Product Discounts and Vouchers is public; all their write operations require a verified current admin in PostgreSQL.
+The /user endpoint returns each claim with its associated voucher under the vouchers property. The admin use endpoint marks USED; checkout voucher redemption is ported in PR #3; payment settlement is not ported. Access JWTs are signature-verified and checked against the CURRENT user, active flag and role in PostgreSQL. Admin/Administrator/Super Admin/Superadmin role names have elevated access (case-insensitive); customer access is owner-scoped. Read access to Discounts, Product Discounts and Vouchers is public; all their write operations require a verified current admin in PostgreSQL.
 
 Role creation/renaming/deletion is admin-only. Customers can edit their own safe profile fields, but cannot set roleId or isActive or edit another user's account. Password changes require the authenticated account owner **and the existing password** through PUT /users/:id/password; PATCH /users/:id rejects password changes for both user and admin. User directory GET /users requires admin, and GET /users/:id is self/admin only. User deletion is admin-only. Role changes invalidate access tokens with the old role claim. Admin accounts must already exist in the database or be provisioned out-of-band; there is no public bootstrap-admin endpoint.
 
@@ -84,7 +84,7 @@ Categories and Products mutations and product-image changes are admin-only; Inve
 
 **Checkout foundation invariants (PR #2):** Address create/update/delete serialize on the owning User row (\`FOR UPDATE\`) so simultaneous requests cannot establish two primary addresses. The first address is automatically primary; selecting another demotes the previous primary atomically; attempting to unset the only primary returns 409. When a primary address is deleted, another existing address becomes primary; deleting the user's final address returns 409. New address creates also repair any already-invalid zero/multiple-primary state left by the earlier code, without a database migration. The \`isPrimary\` switch is a deliberate correction to legacy Nest behavior.
 
-Inventory PATCH accepts only \`quantity >= 0\`, \`reservedQuantity >= 0\`, and \`reservedQuantity <= quantity\`. Negative inputs return 400; inconsistent available/reserved state returns 409. Updates lock the Inventory row in a PostgreSQL transaction to prevent concurrent partial updates violating these constraints. Future PR #3 Checkout stock reservations must use the same row-locking invariant.
+Inventory PATCH accepts only \`quantity >= 0\`, \`reservedQuantity >= 0\`, and \`reservedQuantity <= quantity\`. Negative inputs return 400; inconsistent available/reserved state returns 409. Updates lock the Inventory row in a PostgreSQL transaction to prevent concurrent partial updates violating these constraints. PR #3 Checkout stock reservations use the same row-locking invariant.
 
 \`POST /auth/logout-all\` requires a **currently active refresh session**, including a matching unexpired UserToken database row, not merely a valid JWT signature. Revoked/replayed tokens return 401 and cannot delete sessions belonging to the same user. Authorized logout-all still revokes all active sessions atomically. The dedicated dummy login is unchanged.
 
@@ -99,3 +99,7 @@ The deliberate dummy-customer-login endpoint and its known test account credenti
 - Zod-style pagination accepts numeric notations such as page=1.0 and limit=1e1. Noncanonical URL UUIDs are rejected with 400.
 - Promotion DTO numeric fields accept fractions as source Zod does. Prisma-backed Int columns store the integer portion.
 - User-voucher ACL, product-discount counts and semantic database errors are approved legacy corrections.
+
+### PR #3: Orders / Checkout
+
+POST /orders/checkout exposes an explicit authenticated API contract for the existing NestJS 17-step CQRS checkout handler (its OrdersController had no HTTP route). One GORM/PostgreSQL transaction coordinates Cart, Inventory, Discounts, Vouchers and UserVoucher claims and inserts Order/OrderItems, Payment PENDING and Shipment PENDING. New order list/detail reads are owner/admin scoped. See [full request shape, safeguards and limitations](orders-checkout.md). Payment processing and trusted courier pricing are **not** implemented; the caller provides a validated but otherwise unverified shipping cost.

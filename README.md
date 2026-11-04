@@ -57,9 +57,10 @@ The application does not call AutoMigrate or alter database tables on startup. U
 - Authentication, sessions, users, roles, addresses
 - Categories, products, product detail/information, inventory, carts
 - Discounts, product discount assignments, vouchers, user voucher claims
+- Orders & Checkout (transactional stock/voucher/cart, pending payment and shipment records)
 - Media delivery and health checks
 
-See [API reference](docs/api.md) for supported routes, input requirements and response behavior.
+See [API reference](docs/api.md) for supported routes, input requirements and response behavior. For PR #3 checkout shape, transactional rules, concurrency tests and non-production boundaries, see [Orders / Checkout](docs/orders-checkout.md).
 
 ## Project structure
 
