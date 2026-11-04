@@ -75,3 +75,13 @@ The side-by-side harness runs the original NestJS and Go services with separatel
 - **No automatic migration, schema change, or production DB data modification.**
 
 **PR #2 is the Promotions feature batch**, not full application parity. Orders/checkout, Payments, Shipments, Reviews, Recommendations, Analytics and Notifications remain unported. Uncovered edge cases may exist; treat CI success as evidence for tested behavior only.
+
+
+### Security and voucher eligibility hardening on PR #2 (2026-11-05)
+
+- Code from PR #1 was fixed directly on the PR #2 branch, **without modifying or merging PR #1**. Shared \`sessions.Actor\` middleware verifies signed bearer access tokens against the current, active database user and actual role on every authorized route.
+- Roles: creating, renaming and deleting roles requires Admin. Users: self-service edit is limited to non-privileged profile fields; only Admin may change roleId or isActive; password change is owner-only, image owner/Admin, deletion Admin-only. Customer role and user privilege escalation via anonymous or self-service APIs are now blocked.
+- Discounts/Vouchers/Product Discounts: reads remain public; **all writes are admin-only**. User Vouchers use the same shared authorization, including self-only claims and admin global operations.
+- Claim voucher: server validates active status, start/end dates, prior claims, user active state and capacity; claims acquire PostgreSQL voucher-row locks to prevent concurrent over-claim. The conservative capacity count uses max(redeemedCount, number of existing claims) against maxRedeemed and rejects zero-capacity vouchers. No schema migration is required. Client-supplied claimedAt/expiredAt are ignored; server writes UTC now and voucher endDate.
+- Source-parity acceptance was updated to admin credentials for promotions writes and fresh claim vouchers. The 19 original baseline requests retain 15 identical + 4 documented differences; additional checks now include anonymous role writes/promo writes and server-owned claim timestamps. Latest side-by-side result: **34 matches, 13 documented differences, 0 unexpected**. Concurrency, disabled/expired/too-early/exhausted, duplicate and minimal-body cases are in the PostgreSQL integration tests.
+- Auth and validation changes above are explicitly approved legacy corrections and **not** claims of exact byte-for-byte parity. Checkout/redemption transaction rules remain for a later stacked PR.

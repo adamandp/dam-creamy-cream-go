@@ -7,7 +7,7 @@ import base64
 import hashlib
 import hmac
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import sys
 import time
@@ -20,6 +20,8 @@ D = "55555555-5555-4555-8555-555555555555"
 PD = "66666666-6666-4666-8666-666666666666"
 P = "44444444-4444-4444-8444-444444444444"
 V = "77777777-7777-4777-8777-777777777777"
+CLAIM_V = "77777777-7777-4777-8777-777777777778"
+COERCE_V = "77777777-7777-4777-8777-777777777779"
 UV = "88888888-8888-4888-8888-888888888888"
 CUSTOMER = "22222222-2222-4222-8222-222222222222"
 OTHER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -57,7 +59,9 @@ DEFAULT_VOUCHER = dict(
     minimumPurchase=100, isActive=True, startDate="2026-01-01",
     endDate="2027-01-01", maxRedeemed=50, redeemedCount=0
 )
-CLAIM = dict(userId=CUSTOMER, voucherId=V, claimedAt="2026-01-01", expiredAt="2027-01-01")
+CLAIM = dict(userId=CUSTOMER, voucherId=CLAIM_V,
+             claimedAt=datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00","Z"),
+             expiredAt="2099-01-01")
 
 
 def request(port, method, path, body=None, actor="customer"):
@@ -124,7 +128,7 @@ def fixed_user_route(n, g):
     )
 
 
-def records_and_utc_timestamps_match(n, g):
+def records_and_utc_timestamps_match(n, g, authoritative_claims=False):
     # Generated database UUIDs and subsecond creation times are naturally
     # distinct between two independent servers; all stable business fields
     # must match, and both servers must write timestamps on the same UTC clock.
@@ -133,7 +137,12 @@ def records_and_utc_timestamps_match(n, g):
     if n[1].get("message") != g[1].get("message") or n[1].get("paging") != g[1].get("paging"):
         return False
     def stable(record):
-        return {k: v for k, v in record.items() if k not in ("id", "createdAt", "updatedAt")}
+        result = {k: v for k, v in record.items() if k not in ("id", "createdAt", "updatedAt")}
+        # New claims deliberately replace caller-supplied claimedAt with
+        # server UTC time. Retain exact comparison of the original seed claim.
+        if authoritative_claims and record.get("voucherId") in (CLAIM_V, COERCE_V):
+            result.pop("claimedAt", None)
+        return result
     def sorted_records(value):
         return sorted(value, key=lambda x: (json.dumps(stable(x), sort_keys=True), x["createdAt"]))
     a, b = sorted_records(n[1].get("data", [])), sorted_records(g[1].get("data", []))
@@ -146,6 +155,15 @@ def records_and_utc_timestamps_match(n, g):
             old = datetime.fromisoformat(x[field].replace("Z", "+00:00"))
             new = datetime.fromisoformat(y[field].replace("Z", "+00:00"))
             if abs((old - new).total_seconds()) > 10:
+                return False
+        if authoritative_claims and y.get("voucherId") in (CLAIM_V, COERCE_V):
+            # UTC claim timestamp must be close to the Go server insert time,
+            # not to an arbitrary value in the client request.
+            claimed = datetime.fromisoformat(y["claimedAt"].replace("Z", "+00:00"))
+            created = datetime.fromisoformat(y["createdAt"].replace("Z", "+00:00"))
+            if abs((claimed - created).total_seconds()) > 10:
+                return False
+            if y["expiredAt"] != "2099-01-01T00:00:00.000Z":
                 return False
     return True
 
@@ -188,13 +206,13 @@ verify("role-filtered voucher list", "GET", "/user-vouchers/voucher/" + V, actor
 
 # Original 8 writes: use the correct signed identity for the new Go ACL.
 for method, path, payload, actor in [
-    ("PATCH", "/discounts/" + D, {"maxApplied": 7}, "customer"),
-    ("PATCH", "/vouchers/" + V, {"minimumPurchase": 40000}, "customer"),
+    ("PATCH", "/discounts/" + D, {"maxApplied": 7}, "admin"),
+    ("PATCH", "/vouchers/" + V, {"minimumPurchase": 40000}, "admin"),
     ("PATCH", "/user-vouchers/" + UV, None, "admin"),
-    ("DELETE", "/product-discounts/" + PD, None, "customer"),
-    ("DELETE", "/vouchers/" + V, None, "customer"),
-    ("POST", "/discounts", DEFAULT_DISCOUNT, "customer"),
-    ("POST", "/vouchers", DEFAULT_VOUCHER, "customer"),
+    ("DELETE", "/product-discounts/" + PD, None, "admin"),
+    ("DELETE", "/vouchers/" + V, None, "admin"),
+    ("POST", "/discounts", DEFAULT_DISCOUNT, "admin"),
+    ("POST", "/vouchers", DEFAULT_VOUCHER, "admin"),
     ("POST", "/user-vouchers", CLAIM, "customer"),
 ]:
     verify(method + " " + path, method, path, payload, actor, baseline_case=True)
@@ -205,19 +223,20 @@ verify("out-of-bounds pagination Zod errors", "GET", "/vouchers?page=0")
 verify("invalid parameter UUID", "GET", "/discounts/invalid-id")
 verify("bracketed UUID rejected", "GET", "/discounts/%7B" + D + "%7D")
 verify("UUID URN rejected", "GET", "/discounts/urn:uuid:" + D)
-verify("unchanged field name camelCase", "PATCH", "/discounts/" + D, {"name": "New Title", "maxApplied": 7})
-verify("unchanged date accepted", "PATCH", "/discounts/" + D, {"startDate": "2026-01-01T00:00:00.000Z"})
-verify("unchanged voucher date accepted", "PATCH", "/vouchers/" + V, {"endDate": "2027-01-01T00:00:00.000Z"})
+verify("unchanged field name camelCase", "PATCH", "/discounts/" + D, {"name": "New Title", "maxApplied": 7}, actor="admin")
+verify("unchanged date accepted", "PATCH", "/discounts/" + D, {"startDate": "2026-01-01T00:00:00.000Z"}, actor="admin")
+verify("unchanged voucher date accepted", "PATCH", "/vouchers/" + V, {"endDate": "2027-01-01T00:00:00.000Z"}, actor="admin")
 fraction_discount = dict(DEFAULT_DISCOUNT, name="Fraction Sale", maxApplied=1.5)
-verify("fractional Int discount accepted", "POST", "/discounts", fraction_discount)
+verify("fractional Int discount accepted", "POST", "/discounts", fraction_discount, actor="admin")
 fraction_voucher = dict(DEFAULT_VOUCHER, code="FRACTION15", name="Fraction Sale", maxRedeemed=1.5)
-verify("fractional Int voucher accepted", "POST", "/vouchers", fraction_voucher)
+verify("fractional Int voucher accepted", "POST", "/vouchers", fraction_voucher, actor="admin")
 invalid_number = dict(DEFAULT_DISCOUNT, name="Invalid Number", maxApplied="not a number")
-verify("Zod input validation JSON", "POST", "/discounts", invalid_number)
-verify("date numeric string coercion", "POST", "/user-vouchers", dict(CLAIM, claimedAt="0"))
+verify("Zod input validation JSON", "POST", "/discounts", invalid_number, actor="admin")
+verify("date numeric string coercion", "POST", "/user-vouchers", dict(CLAIM, voucherId=COERCE_V, claimedAt="0"))
 verify("new discount records and UTC timestamps", "GET", "/discounts", equivalent=records_and_utc_timestamps_match)
 verify("new voucher records and UTC timestamps", "GET", "/vouchers", equivalent=records_and_utc_timestamps_match)
-verify("claim records and UTC timestamps", "GET", "/user-vouchers", actor="admin", equivalent=records_and_utc_timestamps_match)
+verify("claim records and server-owned UTC dates", "GET", "/user-vouchers", actor="admin",
+       equivalent=lambda n, g: records_and_utc_timestamps_match(n, g, authoritative_claims=True))
 verify("non-owner claim access blocked", "GET", "/user-vouchers/" + UV, actor="other",
        approved=lambda n, g: statuses(n, g, 200, 403))
 verify("customer cannot update status", "PATCH", "/user-vouchers/" + UV, actor="customer",
@@ -228,9 +247,21 @@ verify("cross-account claim blocked", "POST", "/user-vouchers", dict(CLAIM, user
        approved=lambda n, g: statuses(n, g, 201, 403))
 verify("foreign-key error is semantic conflict", "POST", "/vouchers",
        dict(DEFAULT_VOUCHER, code="BADFOREIGN", productId="00000000-0000-4000-8000-000000000000"),
-       approved=lambda n, g: statuses(n, g, 500, 409))
+       actor="admin", approved=lambda n, g: statuses(n, g, 500, 409))
 verify("invalid product-discount route UUID is 400", "GET", "/product-discounts/invalid-id",
        approved=lambda n, g: statuses(n, g, 500, 400))
+
+# Additional explicit authorization source fixes, evaluated last so that
+# writes permitted by the NestJS legacy server do not skew preceding lists.
+verify("anonymous voucher creation forbidden", "POST", "/vouchers",
+       dict(DEFAULT_VOUCHER, code="ANONSEC"), actor=None,
+       approved=lambda n,g: statuses(n,g,201,401))
+verify("customer discount creation forbidden", "POST", "/discounts",
+       dict(DEFAULT_DISCOUNT, name="Customer Deal"), actor="customer",
+       approved=lambda n,g: statuses(n,g,201,403))
+verify("anonymous role mutation forbidden", "PATCH", "/roles/"+CUSTOMER_ROLE,
+       {"name":"HijackedCustomer"}, actor=None,
+       approved=lambda n,g: statuses(n,g,200,401))
 
 print(f"BASELINE={baseline}; MATCH={exact}; APPROVED_CHANGES={intentional}; UNEXPECTED={failures}")
 if failures != 0 or baseline != 19 or exact < 19 or intentional < 4:

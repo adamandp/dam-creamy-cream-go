@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
@@ -98,9 +99,9 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
-	discounts.NewService(tx).Routes(app)
-	productdiscounts.NewService(tx).Routes(app)
-	vouchers.NewService(tx).Routes(app)
+	discounts.NewService(tx, ses).Routes(app)
+	productdiscounts.NewService(tx, ses).Routes(app)
+	vouchers.NewService(tx, ses).Routes(app)
 	uservouchers.NewService(tx, ses).Routes(app)
 
 	// The empty Discounts list uses the existing "Users" NotFound label.
@@ -108,10 +109,10 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(empty["message"]), "Users") {
 		t.Fatalf("unexpected Discounts empty response: %+v", empty)
 	}
-	testBody(t, testCall(t, app, "POST", "/discounts", `{"name":"Winter Deal"}`, "", 400))
-	testBody(t, testCall(t, app, "POST", "/discounts", `{"name":"Invalid123","discountType":"FIXED","value":10,"maxApplied":2,"maxRedeemed":100,"redeemedCount":0,"description":null,"productId":null,"quantity":null,"startDate":"2026-01-01","endDate":"2027-01-01"}`, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/discounts", `{"name":"Winter Deal"}`, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/discounts", `{"name":"Invalid123","discountType":"FIXED","value":10,"maxApplied":2,"maxRedeemed":100,"redeemedCount":0,"description":null,"productId":null,"quantity":null,"startDate":"2026-01-01","endDate":"2027-01-01"}`, "", 400))
 	newDiscount := `{"name":"Winter Deal","discountType":"PERCENTAGE","value":20,"maxApplied":2,"maxRedeemed":100,"redeemedCount":0,"description":null,"productId":null,"quantity":null,"startDate":"2026-01-01T00:00:00.000Z","endDate":"2027-01-01T00:00:00.000Z","ignoreExtra":true}`
-	testBody(t, testCall(t, app, "POST", "/discounts", newDiscount, "", 201))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/discounts", newDiscount, "", 201))
 	var d domain.Discount
 	if err := tx.First(&d, "name = ?", "Winter Deal").Error; err != nil {
 		t.Fatal(err)
@@ -128,10 +129,10 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	if paged["message"] != httpx.Message("get", "User") || len(requiredRows(t, paged)) != 1 {
 		t.Fatalf("Discounts pagination/message contract: %+v", paged)
 	}
-	testBody(t, testCall(t, app, "PATCH", "/discounts/"+dID, `{"name":"Winter Deal"}`, "", 400))
-	testBody(t, testCall(t, app, "PATCH", "/discounts/"+dID, `{"name":"Winter Deal","maxApplied":3}`, "", 400))
-	testBody(t, testCall(t, app, "PATCH", "/discounts/"+dID, `{"maxApplied":3,"description":"Limited offer"}`, "", 200))
-	testBody(t, testCall(t, app, "PATCH", "/discounts/"+dID, `{"description":null}`, "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/discounts/"+dID, `{"name":"Winter Deal"}`, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/discounts/"+dID, `{"name":"Winter Deal","maxApplied":3}`, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/discounts/"+dID, `{"maxApplied":3,"description":"Limited offer"}`, "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/discounts/"+dID, `{"description":null}`, "", 200))
 	var changed domain.Discount
 	if err := tx.First(&changed, "id = ?", dID).Error; err != nil {
 		t.Fatal(err)
@@ -143,9 +144,9 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	// Product-discount association is unique by product_id. Deleting it only
 	// switches is_active to false without removing the row.
 	badAssociation := fmt.Sprintf(`{"productId":%q,"discountId":"00000000-0000-4000-8000-000000000000"}`, product.ID.ID)
-	testBody(t, testCall(t, app, "POST", "/product-discounts", badAssociation, "", 404))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/product-discounts", badAssociation, "", 404))
 	associationBody := fmt.Sprintf(`{"productId":%q,"discountId":%q}`, product.ID.ID, dID)
-	testBody(t, testCall(t, app, "POST", "/product-discounts", associationBody, "", 201))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/product-discounts", associationBody, "", 201))
 	var association domain.ProductDiscount
 	if err := tx.First(&association, "product_id = ?", product.ID.ID).Error; err != nil {
 		t.Fatal(err)
@@ -156,7 +157,7 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	if err := tx.SavePoint("duplicate_product_discount").Error; err != nil {
 		t.Fatal(err)
 	}
-	testBody(t, testCall(t, app, "POST", "/product-discounts", associationBody, "", 409))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/product-discounts", associationBody, "", 409))
 	// Expected PostgreSQL unique violations abort the current transaction until
 	// the savepoint is restored; do not poison the rest of this fixture test.
 	if err := tx.RollbackTo("duplicate_product_discount").Error; err != nil {
@@ -172,7 +173,7 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 		t.Fatalf("product-discount totalItems must count product discounts: %v", list)
 	}
 	testBody(t, testCall(t, app, "GET", "/product-discounts/"+association.ID.ID, "", "", 200))
-	testBody(t, testCall(t, app, "DELETE", "/product-discounts/"+association.ID.ID, "", "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "DELETE", "/product-discounts/"+association.ID.ID, "", "", 200))
 	if err := tx.First(&association, "id = ?", association.ID.ID).Error; err != nil || association.IsActive {
 		t.Fatalf("product-discount must remain soft-disabled: %v %v", association, err)
 	}
@@ -181,9 +182,9 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	}
 
 	// Voucher creation preserves required nullable properties and their defaults.
-	testBody(t, testCall(t, app, "POST", "/vouchers", `{"code":"WELCOME"}`, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/vouchers", `{"code":"WELCOME"}`, "", 400))
 	newVoucher := `{"code":"WELCOME20","name":"Welcome Deal","description":null,"type":"PERCENTAGE","group":"CHECKOUT","value":20,"productId":null,"quantity":null,"minimumPurchase":50000,"isActive":true,"startDate":"2026-01-01","endDate":"2027-01-01","maxRedeemed":100,"redeemedCount":0}`
-	testBody(t, testCall(t, app, "POST", "/vouchers", newVoucher, "", 201))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/vouchers", newVoucher, "", 201))
 	var voucher domain.Voucher
 	if err := tx.First(&voucher, "code = ?", "WELCOME20").Error; err != nil {
 		t.Fatal(err)
@@ -196,25 +197,26 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	if len(requiredRows(t, testBody(t, testCall(t, app, "GET", "/vouchers", "", "", 200)))) != 1 {
 		t.Fatal("voucher pagination list should contain voucher")
 	}
-	testBody(t, testCall(t, app, "PATCH", "/vouchers/"+voucherID, `{"name":"Welcome Deal"}`, "", 400))
-	testBody(t, testCall(t, app, "PATCH", "/vouchers/"+voucherID, `{"group":"WRONG"}`, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/vouchers/"+voucherID, `{"name":"Welcome Deal"}`, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/vouchers/"+voucherID, `{"group":"WRONG"}`, "", 400))
 	badVoucherProduct := `{"productId":"00000000-0000-4000-8000-000000000000"}`
-	testBody(t, testCall(t, app, "PATCH", "/vouchers/"+voucherID, badVoucherProduct, "", 404))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/vouchers/"+voucherID, badVoucherProduct, "", 404))
 	productLink := fmt.Sprintf(`{"productId":%q}`, product.ID.ID)
-	testBody(t, testCall(t, app, "PATCH", "/vouchers/"+voucherID, productLink, "", 200))
-	testBody(t, testCall(t, app, "PATCH", "/vouchers/"+voucherID, `{"productId":null,"description":"Weekend only"}`, "", 200))
-	testBody(t, testCall(t, app, "DELETE", "/vouchers/"+voucherID, "", "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/vouchers/"+voucherID, productLink, "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/vouchers/"+voucherID, `{"productId":null,"description":"Weekend only"}`, "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "DELETE", "/vouchers/"+voucherID, "", "", 200))
 	if err := tx.First(&voucher, "id = ?", voucherID).Error; err != nil || voucher.IsActive {
 		t.Fatalf("voucher soft-disable should preserve row: %+v err=%v", voucher, err)
 	}
 	testBody(t, testCall(t, app, "GET", "/vouchers/"+voucherID, "", "", 200))
 
-	// Claims may be created even for a disabled voucher; the API does not
-	// reject them or evaluate time-window/redemption limits in this endpoint.
+	// Disabled vouchers cannot be claimed. Reactivate after verifying this.
+	claimBody := fmt.Sprintf(`{"userId":%q,"voucherId":%q,"claimedAt":"2026-01-01","expiredAt":"2099-01-01"}`, user.ID.ID, voucherID)
+	testBody(t, promoAuthenticatedCall(t, app, userTokens.AccessToken, "POST", "/user-vouchers", claimBody, 409))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/vouchers/"+voucherID, `{"isActive":true}`, "", 200))
 	// No authentication must never allow creating or modifying claims.
 	testBody(t, testCall(t, app, "POST", "/user-vouchers", "{}", "", 401))
 	testBody(t, testCall(t, app, "GET", "/user-vouchers", "", "", 401))
-	claimBody := fmt.Sprintf(`{"userId":%q,"voucherId":%q,"claimedAt":"2026-01-01","expiredAt":"2027-01-01"}`, user.ID.ID, voucherID)
 	testBody(t, promoAuthenticatedCall(t, app, userTokens.AccessToken, "POST", "/user-vouchers", claimBody, 201))
 	var claim domain.UserVoucher
 	if err := tx.First(&claim, "user_id = ?", user.ID.ID).Error; err != nil {
@@ -222,6 +224,9 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	}
 	if claim.Status != "CLAIMED" {
 		t.Fatalf("new assignment status should be CLAIMED, got %q", claim.Status)
+	}
+	if claim.ClaimedAt.Before(time.Now().UTC().Add(-time.Minute)) || !claim.ExpiredAt.Equal(voucher.EndDate) {
+		t.Fatalf("server must own claimedAt/expiredAt: %+v; voucher expiry %v", claim, voucher.EndDate)
 	}
 	otherUser := domain.User{RoleID: role.ID.ID, Username: "PromoOther", FullName: "Promo Other", Password: "test-only", IsActive: true}
 	if err := tx.Create(&otherUser).Error; err != nil {
@@ -274,7 +279,7 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	// The NestJS Zod DTO uses z.number(), not integer(), and Prisma stores
 	// the integer portion in the existing PostgreSQL Int columns.
 	fractionalDiscount := `{"name":"Fraction Deal","discountType":"PERCENTAGE","value":2,"maxApplied":1.5,"maxRedeemed":9,"redeemedCount":0,"description":null,"productId":null,"quantity":2.9,"startDate":"2026-01-01","endDate":"2027-01-01"}`
-	testBody(t, testCall(t, app, "POST", "/discounts", fractionalDiscount, "", 201))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/discounts", fractionalDiscount, "", 201))
 	var savedFraction domain.Discount
 	if err := tx.First(&savedFraction, "name = ?", "Fraction Deal").Error; err != nil {
 		t.Fatal(err)
@@ -283,7 +288,7 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 		t.Fatalf("fractional input not persisted as Prisma does: %+v", savedFraction)
 	}
 	fractionalVoucher := `{"code":"FRACTION9","name":"Fraction Deal","description":null,"type":"PERCENTAGE","group":"CHECKOUT","value":2,"productId":null,"quantity":1.9,"minimumPurchase":100,"isActive":true,"startDate":"2026-01-01","endDate":"2027-01-01","maxRedeemed":1.5,"redeemedCount":0}`
-	testBody(t, testCall(t, app, "POST", "/vouchers", fractionalVoucher, "", 201))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/vouchers", fractionalVoucher, "", 201))
 	var savedVoucher domain.Voucher
 	if err := tx.First(&savedVoucher, "code = ?", "FRACTION9").Error; err != nil {
 		t.Fatal(err)
@@ -293,8 +298,8 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	}
 	// In NestJS, z.coerce.date always produces a new JS Date instance.
 	// Even the same instant is treated as an update by validateUpdate().
-	testBody(t, testCall(t, app, "PATCH", "/discounts/"+dID, `{"startDate":"2026-01-01T00:00:00.000Z"}`, "", 200))
-	testBody(t, testCall(t, app, "PATCH", "/vouchers/"+voucherID, `{"endDate":"2027-01-01T00:00:00.000Z"}`, "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/discounts/"+dID, `{"startDate":"2026-01-01T00:00:00.000Z"}`, "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/vouchers/"+voucherID, `{"endDate":"2027-01-01T00:00:00.000Z"}`, "", 200))
 	testBody(t, testCall(t, app, "GET", "/discounts?page=1.0&limit=1e1", "", "", 200))
 	testBody(t, testCall(t, app, "GET", "/vouchers?page=1.0&limit=1e1", "", "", 200))
 
@@ -303,13 +308,13 @@ func TestPromotionsAPIOnPostgres(t *testing.T) {
 	if err := tx.SavePoint("discount_fk_guard").Error; err != nil {
 		t.Fatal(err)
 	}
-	testBody(t, testCall(t, app, "DELETE", "/discounts/"+dID, "", "", 409))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "DELETE", "/discounts/"+dID, "", "", 409))
 	if err := tx.RollbackTo("discount_fk_guard").Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Delete(&association).Error; err != nil {
 		t.Fatal(err)
 	}
-	testBody(t, testCall(t, app, "DELETE", "/discounts/"+dID, "", "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "DELETE", "/discounts/"+dID, "", "", 200))
 	testBody(t, testCall(t, app, "GET", "/discounts/"+dID, "", "", 404))
 }

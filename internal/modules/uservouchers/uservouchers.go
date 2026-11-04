@@ -7,7 +7,8 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
-	"strings"
+	"gorm.io/gorm/clause"
+	"time"
 )
 
 type Service struct {
@@ -19,35 +20,14 @@ func NewService(db *gorm.DB, sessions *sessions.Service) *Service {
 	return &Service{db: db, sessions: sessions}
 }
 
-// An actor is resolved from a signed JWT and the CURRENT database role.
-type actor struct {
-	UserID string
-	Admin  bool
-}
-
-func (s *Service) requireActor(c fiber.Ctx) error {
-	claims, err := s.sessions.AccessFor(c)
+// The same current-database authorization is shared with Roles, Users and
+// Promotions, so renaming a role cannot silently bypass a separate guard.
+func (s *Service) ensureAdmin(c fiber.Ctx) error {
+	who, err := s.sessions.Actor(c)
 	if err != nil {
-		return httpx.Unauthorized()
+		return err
 	}
-	var user domain.User
-	if err := s.db.First(&user, "id = ?", claims.Subject).Error; err != nil || !user.IsActive || user.RoleID != claims.Role {
-		return httpx.Unauthorized()
-	}
-	var role domain.Role
-	if err := s.db.First(&role, "id = ?", user.RoleID).Error; err != nil {
-		return httpx.Unauthorized()
-	}
-	name := strings.ToLower(strings.TrimSpace(role.Name))
-	isAdmin := name == "admin" || name == "administrator" || name == "super admin" || name == "superadmin"
-	c.Locals("userVoucherActor", actor{UserID: user.ID.ID, Admin: isAdmin})
-	return c.Next()
-}
-func currentActor(c fiber.Ctx) actor {
-	return c.Locals("userVoucherActor").(actor)
-}
-func requireAdmin(c fiber.Ctx) error {
-	if !currentActor(c).Admin {
+	if !who.Admin {
 		return httpx.Forbidden()
 	}
 	return nil
@@ -55,7 +35,7 @@ func requireAdmin(c fiber.Ctx) error {
 
 func (s *Service) Routes(app fiber.Router) {
 	r := app.Group("/user-vouchers")
-	r.Use(s.requireActor)
+	r.Use(s.sessions.RequireActor)
 	r.Post("/", s.create)
 	r.Get("/", s.findAll)
 	r.Get("/user", s.byUser)
@@ -72,41 +52,82 @@ type CreateInput struct {
 }
 
 func (s *Service) create(c fiber.Ctx) error {
-	if err := promotionutil.ValidateFields(c, promotionutil.UserVoucherFields(), false); err != nil {
+	if err := promotionutil.ValidateFields(c, promotionutil.UserVoucherFields(), true); err != nil {
 		return err
 	}
 	var body CreateInput
 	if err := httpx.Bind(c, &body); err != nil {
 		return err
 	}
-	if err := promotionutil.Required(c, "userId", "voucherId", "claimedAt", "expiredAt"); err != nil {
+	if err := promotionutil.Required(c, "voucherId"); err != nil {
 		return err
 	}
-	who := currentActor(c)
-	if !who.Admin && who.UserID != body.UserID {
-		return httpx.Forbidden()
-	}
-	var user domain.User
-	if err := s.db.First(&user, "id = ?", body.UserID).Error; err != nil {
+	who, err := s.sessions.Actor(c)
+	if err != nil {
 		return err
 	}
-	var voucher domain.Voucher
-	if err := s.db.First(&voucher, "id = ?", body.VoucherID).Error; err != nil {
-		return err
+	userID := who.UserID
+	if body.UserID != "" {
+		if !who.Admin && body.UserID != who.UserID {
+			return httpx.Forbidden()
+		}
+		userID = body.UserID
 	}
-	// Status defaults to CLAIMED; keep user-provided claimedAt and expiredAt.
-	m := domain.UserVoucher{
-		UserID: body.UserID, VoucherID: body.VoucherID, Status: "CLAIMED",
-		ClaimedAt: body.ClaimedAt.Time, ExpiredAt: body.ExpiredAt.Time,
-	}
-	if err := s.db.Create(&m).Error; err != nil {
+	// Serialize claim attempts for a voucher. PostgreSQL row locks prevent
+	// concurrent requests from both passing capacity and duplicate checks.
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		var voucher domain.Voucher
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&voucher, "id = ?", body.VoucherID).Error; err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if !voucher.IsActive {
+			return fiber.NewError(409, "Voucher is inactive")
+		}
+		if now.Before(voucher.StartDate) {
+			return fiber.NewError(409, "Voucher is not yet valid")
+		}
+		if !now.Before(voucher.EndDate) {
+			return fiber.NewError(409, "Voucher has expired")
+		}
+		var user domain.User
+		if err := tx.First(&user, "id = ?", userID).Error; err != nil {
+			return err
+		}
+		if !user.IsActive {
+			return fiber.NewError(409, "User account is inactive")
+		}
+		var duplicate int64
+		if err := tx.Model(&domain.UserVoucher{}).Where("user_id = ? AND voucher_id = ?", userID, voucher.ID.ID).Count(&duplicate).Error; err != nil {
+			return err
+		}
+		if duplicate > 0 {
+			return fiber.NewError(409, "Voucher already claimed by this user")
+		}
+		var totalClaims int64
+		if err := tx.Model(&domain.UserVoucher{}).Where("voucher_id = ?", voucher.ID.ID).Count(&totalClaims).Error; err != nil {
+			return err
+		}
+		usedOrReserved := totalClaims
+		if int64(voucher.RedeemedCount) > usedOrReserved {
+			usedOrReserved = int64(voucher.RedeemedCount)
+		}
+		if voucher.MaxRedeemed <= 0 || usedOrReserved >= int64(voucher.MaxRedeemed) {
+			return fiber.NewError(409, "Voucher redemption limit reached")
+		}
+		// Caller-supplied claimedAt/expiredAt are accepted for legacy request
+		// compatibility but never persisted. Server controls both timestamps.
+		m := domain.UserVoucher{UserID: userID, VoucherID: voucher.ID.ID, Status: "CLAIMED", ClaimedAt: now, ExpiredAt: voucher.EndDate.UTC()}
+		return tx.Create(&m).Error
+	})
+	if err != nil {
 		return err
 	}
 	return c.Status(201).JSON(httpx.Response{Message: httpx.Message("create", "User Voucher")})
 }
 
 func (s *Service) findAll(c fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := s.ensureAdmin(c); err != nil {
 		return err
 	}
 	page, limit, err := httpx.Page(c)
@@ -140,7 +161,10 @@ func (s *Service) byID(c fiber.Ctx) error {
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
 		return err
 	}
-	who := currentActor(c)
+	who, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
 	if !who.Admin && who.UserID != m.UserID {
 		return httpx.Forbidden()
 	}
@@ -152,7 +176,7 @@ func (s *Service) byID(c fiber.Ctx) error {
 }
 
 func (s *Service) byVoucher(c fiber.Ctx) error {
-	if err := requireAdmin(c); err != nil {
+	if err := s.ensureAdmin(c); err != nil {
 		return err
 	}
 	id := c.Params("id")
@@ -171,7 +195,10 @@ func (s *Service) byVoucher(c fiber.Ctx) error {
 }
 
 func (s *Service) byUser(c fiber.Ctx) error {
-	who := currentActor(c)
+	who, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
 	var assignments []domain.UserVoucher
 	if err := s.db.Where("user_id = ?", who.UserID).Find(&assignments).Error; err != nil {
 		return err
@@ -211,7 +238,7 @@ func (s *Service) byUser(c fiber.Ctx) error {
 func (s *Service) use(c fiber.Ctx) error {
 	// Customers must not mark claims USED arbitrarily: checkout (when ported)
 	// or authorized administrators perform the state transition.
-	if err := requireAdmin(c); err != nil {
+	if err := s.ensureAdmin(c); err != nil {
 		return err
 	}
 	id := c.Params("id")

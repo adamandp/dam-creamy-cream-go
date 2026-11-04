@@ -25,3 +25,5 @@ Feature packages should not create independent DB/Redis/MinIO connections. Use t
 The existing Prisma migration creates timestamp-without-time-zone columns. The GORM connection uses a UTC NowFunc; manual session/cart clock writes also use UTC, preventing a 7-hour drift on WIB development hosts. Never assume the local system timezone should be stored in these columns.
 
 The User Vouchers feature resolves JWT bearer claims into the current, active PostgreSQL user and role on each request. Customers may claim/read only their own vouchers, while global listings and USED transitions require an admin role. The authorization code lives in the feature module, not a duplicate database connector.
+
+Authorization is implemented in the shared sessions service (Actor/RequireActor/RequireAdmin/RequireSelfOrAdmin), which checks current active database user and role against signed access JWT claims. Roles, Users, and Promotions use this shared check; User Vouchers also serialize eligibility checks and claim insertion inside a PostgreSQL FOR UPDATE transaction. No schema migration is performed.

@@ -32,13 +32,15 @@ The original suite contains **19 requests: 11 GET and 8 mutations**. The improve
 3. GET /user-vouchers/voucher/:id: non-admin customers receive 403.
 4. GET /user-vouchers/user: Go returns the intended 200 + associated vouchers; NestJS mistakenly routes /user through /:id and returns 400.
 
+The harness uses admin credentials on write routes and fresh, unclaimed vouchers for the claim flows. The source NestJS backend trusts claimedAt from the client, while Go now uses the server UTC clock; the post-write comparator explicitly checks this intentional difference and that expiration comes from the authoritative voucher endDate.
+
 The runner then probes **additional regression cases**: Zod-style pagination with decimal/scientific representations, invalid parameters, exact validation JSON, camelCase no-change messages, repeated date updates, fractional numbers stored in PostgreSQL Int columns, verified admin and owner access, unauthorized claims/status transitions, and FK/route errors. Normalized post-write comparisons also assert business fields and UTC createdAt/updatedAt timestamps agree within 10 seconds despite independent generated UUIDs.
 
 A passing run reports, at minimum:
 
-    BASELINE=19; MATCH=34; APPROVED_CHANGES=10; UNEXPECTED=0
+    BASELINE=19; MATCH=34; APPROVED_CHANGES=13; UNEXPECTED=0
     PARITY AUDIT PASSED — all listed source deviations are intentional and verified
 
-All differences not explicitly allowlisted are errors; the test exits nonzero. Some approved errors intentionally differ semantically (Go uses 409 for FK conflicts and 400 for malformed path UUIDs instead of legacy 500).
+All differences not explicitly allowlisted are errors; the test exits nonzero. Some approved errors intentionally differ semantically (Go uses 409 for FK conflicts and 400 for malformed path UUIDs instead of legacy 500). Additional scenarios verify unauthorized role renaming and anonymous/customer promotion writes are blocked (401/403). Duplicate claims, real concurrency and capacity windows are covered by Go's PostgreSQL integration suite.
 
 The suite starts both servers and database/storage/cache services using **disposable** fixtures and cleans up resources. It does not check out NestJS in GitHub Actions, so run this separately with the original NestJS repository. The CI workflow covers Go unit tests and real PostgreSQL/Redis/MinIO integration tests; it does not claim full app/checkout parity.

@@ -3,13 +3,17 @@ package roles
 import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 )
 
-type Service struct{ db *gorm.DB }
+type Service struct {
+	db       *gorm.DB
+	sessions *sessions.Service
+}
 
-func NewService(db *gorm.DB) *Service { return &Service{db: db} }
+func NewService(db *gorm.DB, ses *sessions.Service) *Service { return &Service{db: db, sessions: ses} }
 
 type Input struct {
 	Name string `json:"name"`
@@ -22,12 +26,12 @@ type view struct {
 func mapRole(m domain.Role) view { return view{ID: m.ID.ID, Name: m.Name} }
 func (s *Service) Routes(app fiber.Router) {
 	r := app.Group("/roles")
-	r.Post("/", s.create)
+	r.Post("/", s.sessions.RequireAdmin, s.create)
 	r.Get("/", s.findAll)
 	r.Get("/name/:name", s.byName)
 	r.Get("/:id", s.byID)
-	r.Patch("/:id", s.update)
-	r.Delete("/:id", s.remove)
+	r.Patch("/:id", s.sessions.RequireAdmin, s.update)
+	r.Delete("/:id", s.sessions.RequireAdmin, s.remove)
 }
 func (s *Service) create(c fiber.Ctx) error {
 	var body Input

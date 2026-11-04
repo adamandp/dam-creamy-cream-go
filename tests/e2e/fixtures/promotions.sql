@@ -23,3 +23,10 @@ INSERT INTO users(id,role_id,username,password,full_name,is_active,created_at,up
 VALUES
 ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','99999999-9999-4999-8999-999999999999','ParityAdmin','fixture-not-a-login','Parity Admin',true,'2026-01-01 00:00:00+00','2026-01-01 00:00:00+00'),
 ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','11111111-1111-4111-8111-111111111111','ParityOther','fixture-not-a-login','Parity Other',true,'2026-01-01 00:00:00+00','2026-01-01 00:00:00+00');
+
+-- Two independent unclaimed vouchers allow valid claim and date-coercion
+-- scenarios without relying on the pre-existing claimed WELCOME20 voucher.
+INSERT INTO vouchers (id,code,name,description,type,"group",value,product_id,quantity,minimum_purchase,is_active,start_date,end_date,max_redeemed,redeemed_count,created_at,updated_at)
+VALUES
+('77777777-7777-4777-8777-777777777778','CLAIMABLE1','Claimable One',NULL,'FIXED','CHECKOUT',10,NULL,NULL,0,true,'2020-01-01','2099-01-01',10,0,'2026-01-01','2026-01-01'),
+('77777777-7777-4777-8777-777777777779','CLAIMABLE2','Claimable Two',NULL,'FIXED','CHECKOUT',10,NULL,NULL,0,true,'2020-01-01','2099-01-01',10,0,'2026-01-01','2026-01-01');
