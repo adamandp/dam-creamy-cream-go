@@ -12,6 +12,7 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/infrastructure"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/categories"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -36,17 +37,22 @@ func TestCategoryRedisCacheAgainstRealServices(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	key := "categories:1:10"
+	key := "categories:v0:1:10"
 	if err := client.Del(ctx, key).Err(); err != nil {
 		t.Fatal(err)
 	}
 	defer client.Del(context.Background(), key)
+	// No stale shared revision state should leak into the isolated test.
+	if err := client.Del(ctx, "categories:revision").Err(); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Del(context.Background(), "categories:revision")
 	cat := domain.Category{Name: "Ice Cream", IsActive: true}
 	if err := tx.Create(&cat).Error; err != nil {
 		t.Fatal(err)
 	}
 	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
-	categories.NewService(tx, client).Routes(app)
+	categories.NewService(tx, client, sessions.NewService(tx, "test-access", "test-refresh")).Routes(app)
 	res, err := app.Test(httptest.NewRequest("GET", "/categories?page=1&limit=10", nil))
 	if err != nil {
 		t.Fatal(err)

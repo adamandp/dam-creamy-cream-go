@@ -2,6 +2,8 @@ package sessions
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"github.com/mileusna/useragent"
@@ -13,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Service struct {
@@ -35,8 +38,31 @@ type Claims struct {
 }
 
 func (s *Service) sign(userID, roleID string, ttl time.Duration, secret []byte) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{Role: roleID, RegisteredClaims: jwt.RegisteredClaims{Subject: userID, IssuedAt: jwt.NewNumericDate(time.Now()), ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl))}})
+	// Access tokens preserve the existing iat+exp JWT format.
+	now := time.Now().UTC()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{Role: roleID, RegisteredClaims: jwt.RegisteredClaims{
+		Subject: userID, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+	}})
 	return token.SignedString(secret)
+}
+
+func (s *Service) signRefresh(userID, roleID string) (string, error) {
+	// Refresh tokens need an unpredictable unique jti even within one second.
+	// The original Prisma column user_tokens.token is VARCHAR(255), so omit
+	// optional JWT iat and typ fields; exp and verified HS256 remain required.
+	// A 128-bit random base64url jti keeps the token below 255 characters.
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	now := time.Now().UTC()
+	claims := Claims{Role: roleID, RegisteredClaims: jwt.RegisteredClaims{
+		Subject: userID, ID: base64.RawURLEncoding.EncodeToString(id[:]),
+		ExpiresAt: jwt.NewNumericDate(now.Add(7 * 24 * time.Hour)),
+	}}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	delete(token.Header, "typ") // optional RFC 7519 field, saves bytes
+	return token.SignedString(s.refreshSecret)
 }
 func (s *Service) parse(token string, secret []byte) (*Claims, error) {
 	if token == "" {
@@ -63,19 +89,45 @@ func (s *Service) AccessFor(c fiber.Ctx) (*Claims, error) {
 	}
 	return nil, httpx.Unauthorized()
 }
+
+// ActiveRefresh validates the signature AND the backing session row.
+// Merely verifying a JWT is insufficient after logout/logout-all.
+func (s *Service) ActiveRefresh(ctx context.Context, token string) (*Claims, error) {
+	claims, err := s.VerifyRefresh(token)
+	if err != nil {
+		return nil, httpx.Unauthorized()
+	}
+	var activeTokens int64
+	if err := s.db.WithContext(ctx).Model(&domain.UserToken{}).
+		Where("token = ? AND user_id = ? AND \"expiredAt\" > ?", token, claims.Subject, time.Now().UTC()).
+		Count(&activeTokens).Error; err != nil {
+		return nil, err
+	}
+	if activeTokens == 0 {
+		return nil, httpx.Unauthorized()
+	}
+	var user domain.User
+	if err := s.db.WithContext(ctx).First(&user, "id = ?", claims.Subject).Error; err != nil {
+		return nil, httpx.Unauthorized()
+	}
+	if !user.IsActive || user.RoleID != claims.Role {
+		return nil, httpx.Unauthorized()
+	}
+	return claims, nil
+}
 func (s *Service) CookieUser(c fiber.Ctx) (*Claims, error) {
-	return s.VerifyRefresh(c.Cookies("refreshToken"))
+	return s.ActiveRefresh(c.Context(), c.Cookies("refreshToken"))
 }
 func (s *Service) NewTokens(ctx context.Context, userID, roleID, existing, agent, ip string) (Tokens, error) {
 	access, err := s.sign(userID, roleID, 15*time.Minute, s.accessSecret)
 	if err != nil {
 		return Tokens{}, err
 	}
-	refresh, err := s.sign(userID, roleID, 7*24*time.Hour, s.refreshSecret)
+	refresh, err := s.signRefresh(userID, roleID)
 	if err != nil {
 		return Tokens{}, err
 	}
-	now := time.Now()
+	now := time.Now().UTC()
 	info, _ := json.Marshal(parseBrowserInfo(ip, "dummy-"+agent))
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if existing != "" {
@@ -96,16 +148,9 @@ func (s *Service) NewTokens(ctx context.Context, userID, roleID, existing, agent
 	return Tokens{AccessToken: access, RefreshToken: refresh}, nil
 }
 func (s *Service) Refresh(ctx context.Context, token string) (string, error) {
-	claims, err := s.VerifyRefresh(token)
+	claims, err := s.ActiveRefresh(ctx, token)
 	if err != nil {
 		return "", err
-	}
-	var count int64
-	if err := s.db.WithContext(ctx).Model(&domain.UserToken{}).Where("token = ? AND \"expiredAt\" > ?", token, time.Now()).Count(&count).Error; err != nil {
-		return "", err
-	}
-	if count == 0 {
-		return "", httpx.Unauthorized()
 	}
 	return s.sign(claims.Subject, claims.Role, 15*time.Minute, s.accessSecret)
 }
@@ -123,18 +168,26 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 	return nil
 }
 func (s *Service) LogoutAll(ctx context.Context, token string) error {
-	claims, err := s.VerifyRefresh(token)
+	// A valid JWT signature is not proof that this login session still exists.
+	// Logout-all may only be authorized by an active, non-revoked refresh token.
+	claims, err := s.ActiveRefresh(ctx, token)
 	if err != nil {
 		return err
 	}
-	res := s.db.WithContext(ctx).Where("user_id = ?", claims.Subject).Delete(&domain.UserToken{})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return httpx.NotFound("Token")
-	}
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Lock the authorizing row so a concurrent logout cannot revoke it
+		// between validation and the all-sessions deletion.
+		var active domain.UserToken
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("token = ? AND user_id = ? AND \"expiredAt\" > ?", token, claims.Subject, time.Now().UTC()).
+			First(&active).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return httpx.Unauthorized()
+			}
+			return err
+		}
+		return tx.Where("user_id = ?", claims.Subject).Delete(&domain.UserToken{}).Error
+	})
 }
 func (s *Service) Routes(app fiber.Router) { app.Post("/sessions/refresh", s.refreshHandler) }
 func (s *Service) refreshHandler(c fiber.Ctx) error {

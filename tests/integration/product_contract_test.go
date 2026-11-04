@@ -9,6 +9,7 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/products"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -30,7 +31,7 @@ func TestCatalogAndProductInformationOnPrismaSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	discountValue := 20.0
-	discount := domain.Discount{Name: "Special", DiscountType: "PERCENTAGE", Value: &discountValue, MaxApplied: 1, MaxRedeemed: 20, StartDate: time.Now().Add(-time.Hour), EndDate: time.Now().Add(time.Hour)}
+	discount := domain.Discount{Name: "Special", DiscountType: "PERCENTAGE", Value: &discountValue, MaxApplied: 1, MaxRedeemed: 20, StartDate: time.Now().UTC().Add(-time.Hour), EndDate: time.Now().UTC().Add(time.Hour)}
 	if err := tx.Create(&discount).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestCatalogAndProductInformationOnPrismaSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
-	products.NewService(tx, stubImageStore{}).Routes(app)
+	products.NewService(tx, stubImageStore{}, sessions.NewService(tx, "test-access", "test-refresh")).Routes(app)
 
 	catalog := testBody(t, testCall(t, app, "GET", "/products/catalog?q=vanilla&cat="+cat.ID.ID+"&min=10000&max=15000&sort=asc", "", "", 200))
 	rows, ok := catalog["data"].([]any)
@@ -87,7 +88,7 @@ func TestCatalogAndProductInformationOnPrismaSchema(t *testing.T) {
 ⚡ Why Choose This Product?
 Great flavor`
 	if data["information"] != expected {
-		t.Errorf("product information builder differs from NestJS: %q", data["information"])
+		t.Errorf("product information differs from expected string: %q", data["information"])
 	}
 	// Query layer should not return inactive products.
 	if err := tx.Model(&product).Update("is_active", false).Error; err != nil {

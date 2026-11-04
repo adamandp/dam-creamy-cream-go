@@ -6,6 +6,7 @@ import (
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/pricing"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
@@ -76,7 +77,7 @@ func (s *Service) add(c fiber.Ctx) error {
 			return err
 		}
 		item := domain.CartItem{CartID: cart.ID.ID, ProductID: body.ProductID, Quantity: body.Quantity}
-		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "cart_id"}, {Name: "product_id"}}, DoUpdates: clause.Assignments(map[string]any{"quantity": gorm.Expr("cart_items.quantity + EXCLUDED.quantity"), "updated_at": time.Now()})}).Create(&item).Error
+		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "cart_id"}, {Name: "product_id"}}, DoUpdates: clause.Assignments(map[string]any{"quantity": gorm.Expr("cart_items.quantity + EXCLUDED.quantity"), "updated_at": time.Now().UTC()})}).Create(&item).Error
 	})
 	if err != nil {
 		return err
@@ -159,30 +160,21 @@ func (s *Service) byUser(c fiber.Ctx) error {
 		return c.JSON(httpx.Response{Message: httpx.Message("get", "Cart"), Data: data, Paging: httpx.Pagination(page, limit, total)})
 	}
 	var rows []CartRow
-	err = s.db.Table("cart_items ci").Select(`ci.product_id, ci.quantity, p.name, p.image_url, cat.name AS category, p.price, d.discount_type, d.value AS discount_value, d.start_date, d.end_date`).
+	now := time.Now().UTC()
+	err = s.db.Table("cart_items ci").Select(`ci.product_id, ci.quantity, p.name, p.image_url, cat.name AS category, p.price, d.discount_type, d.value AS discount_value`).
 		Joins("JOIN carts ca ON ca.id = ci.cart_id").
 		Joins("JOIN products p ON p.id = ci.product_id").
 		Joins("JOIN category cat ON cat.id = p.category_id").
 		Joins("LEFT JOIN product_discounts pd ON pd.product_id = p.id").
-		Joins("LEFT JOIN discounts d ON d.id = pd.discount_id").
+		Joins("LEFT JOIN discounts d ON d.id = pd.discount_id AND "+pricing.ActiveAssociation, now, now).
 		Where("ca.user_id = ?", claims.Subject).Offset((page - 1) * limit).Limit(limit).Scan(&rows).Error
 	if err != nil {
 		return err
 	}
-	now := time.Now()
 	for _, r := range rows {
 		item := CartResponse{ID: r.ProductID, Name: r.Name, ImageURL: r.ImageURL, Category: r.Category, Price: r.Price, Qty: r.Quantity}
-		if r.DiscountType != nil && r.DiscountValue != nil && r.StartDate != nil && r.EndDate != nil && !r.StartDate.After(now) && !r.EndDate.Before(now) {
-			var price float64
-			if *r.DiscountType == "PERCENTAGE" {
-				price = r.Price - r.Price**r.DiscountValue/100
-			} else {
-				price = r.Price - *r.DiscountValue
-				if price < 0 {
-					price = 0
-				}
-			}
-			item.DiscountPrice = &price
+		if r.DiscountType != nil {
+			item.DiscountPrice = pricing.DiscountPrice(r.Price, *r.DiscountType, r.DiscountValue)
 		}
 		data = append(data, item)
 	}

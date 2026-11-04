@@ -28,4 +28,8 @@ Extracted from `src/model/*/*.controller.ts` on `master`.
 | Orders | NestJS controller exists but declares **no HTTP routes** on `master`. Checkout is implemented as CQRS steps. |
 | Health | `GET /health`, `GET /health/db` |
 
-All paths outside first-pass modules are **source inventory only**, not registered endpoints in the Go application yet.
+As of PR #2, the Go API also registers **Discounts, Product Discounts, Vouchers and User Vouchers**. Routes for other pending modules are still source inventory only, not Go endpoints.
+
+**Known corrected source routing defect:** NestJS has `GET /user-vouchers/:id` above `GET /user-vouchers/user`, so the literal path `/user` is treated as a UUID and returns 400. Go registers `/user` before `/:id`, returning the intended user vouchers (200). This is the single recorded mismatch among 19 side-by-side HTTP test cases. See `parity.md` and `tests/e2e/compare_promotions.py`.
+\n**Further approved PR #2 corrections:** Product Discounts pagination counts its own records instead of users. User Voucher listing/claim/USED operations enforce bearer JWT authentication, owner scoping and admin authorization as applicable. Invalid Product Discount URL UUIDs return 400 instead of the legacy internal 500. Prisma constraint errors are mapped to semantic HTTP statuses.\n
+PR #2 security hardening also protects legacy Roles/Users mutations and all Promotions write routes with centralized current-database authorization, and validates claim eligibility with PostgreSQL voucher-row locking. See docs/api.md and docs/parity.md.
