@@ -24,7 +24,7 @@ func TestImageFormat(t *testing.T) {
 	}{
 		{"jpeg", []byte{0xff, 0xd8, 0xff, 0xe0}, "image/jpeg", "jpg", nil},
 		{"png", []byte{137, 80, 78, 71, 13, 10, 26, 10, 0}, "image/png", "png", nil},
-		{"webp", []byte{'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'E', 'B', 'P'}, "image/webp", "webp", nil},
+		{"webp", []byte{'R', 'I', 'F', 'F', 12, 0, 0, 0, 'W', 'E', 'B', 'P', 'V', 'P', '8', ' '}, "image/webp", "webp", nil},
 		{"text", []byte("<script>alert(1)</script>"), "", "", infrastructure.ErrInvalidImage},
 		{"empty", nil, "", "", infrastructure.ErrInvalidImage},
 		{"oversized", make([]byte, infrastructure.MaxImageBytes+1), "", "", infrastructure.ErrImageTooLarge},
@@ -79,7 +79,7 @@ func TestMediaReadUsesPrivateStore(t *testing.T) {
 func TestMediaMissingObject(t *testing.T) {
 	app := fiber.New()
 	media.NewService(fakeStore{err: infrastructure.ErrImageNotFound}).Routes(app)
-	resp, err := app.Test(httptest.NewRequest("GET", "/media/users/x/y", nil))
+	resp, err := app.Test(httptest.NewRequest("GET", "/media/users/5918248d-8523-4351-a9ce-c3e56c6c931c/6c9f7291-04d5-44b1-931a-7634a33c2b21.jpg", nil))
 	if err != nil {
 		t.Fatal(err)
 	}

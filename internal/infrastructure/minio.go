@@ -74,6 +74,14 @@ func ImageFormat(data []byte) (contentType, extension string, err error) {
 	if len(data) == 0 {
 		return "", "", ErrInvalidImage
 	}
+	// net/http.DetectContentType does not recognize WebP. Validate its RIFF/WEBP
+	// container signature and the first image chunk type explicitly.
+	if len(data) >= 16 && bytes.Equal(data[:4], []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP")) {
+		switch string(data[12:16]) {
+		case "VP8 ", "VP8L", "VP8X":
+			return "image/webp", "webp", nil
+		}
+	}
 	switch http.DetectContentType(data) {
 	case "image/jpeg":
 		return "image/jpeg", "jpg", nil

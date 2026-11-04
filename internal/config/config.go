@@ -47,8 +47,13 @@ func Load() (Config, error) {
 	if cfg.MinIOEndpoint == "" || cfg.MinIOAccessKey == "" || cfg.MinIOSecretKey == "" {
 		return Config{}, errors.New("MINIO_ENDPOINT, MINIO_ACCESS_KEY and MINIO_SECRET_KEY are required")
 	}
-	if cfg.Environment == "production" && os.Getenv("PUBLIC_API_URL") == "" {
-		return Config{}, errors.New("PUBLIC_API_URL must be explicitly configured in production")
+	if cfg.Environment == "production" {
+		if os.Getenv("PUBLIC_API_URL") == "" {
+			return Config{}, errors.New("PUBLIC_API_URL must be explicitly configured in production")
+		}
+		if len(cfg.PublicAPIURL) < len("https://") || cfg.PublicAPIURL[:len("https://")] != "https://" {
+			return Config{}, errors.New("PUBLIC_API_URL must use HTTPS in production")
+		}
 	}
 	return cfg, nil
 }
