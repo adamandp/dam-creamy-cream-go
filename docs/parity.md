@@ -45,8 +45,19 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 - Current-user cookie is JWT-verified instead of decoded without signature verification.
 - Refresh endpoint issues an access JWT using access secret, correcting a likely NestJS mistake.
 - Body validation is hand-written rather than a complete port of each Zod schema; error messages and nullable-field handling are not guaranteed identical.
-- Cloudinary is replaced with MinIO per request. The public image URLs now point to the Go /media route; existing Cloudinary URLs remain stored and untouched. MinIO live integration tests are required before cutover.
+- Cloudinary is replaced with MinIO per request. The public image URLs now point to the Go /media route; existing Cloudinary URLs remain stored and untouched. MinIO upload/read/delete and image HTTP/database integration tests now run in CI against disposable services.
 - GORM model relationship tags for association preloading are not yet exhaustive; query implementations use explicit joins where required.
 - Role pagination keeps the original `Category retrieved` response message from `roles.service.ts`, even though it looks incorrect.
 
 No unimplemented business logic is represented as complete.
+
+
+## PR #1 regression and real-service tests (November 4, 2026)
+
+- Real PostgreSQL schema generated from the original five Prisma migrations, verifying all 23 GORM table and column mappings, including case-sensitive browserInfo, expiredAt and finalPrice.
+- Backend routes covered by integration tests include Auth, Sessions, Users, Categories, Products, Product Detail/Information, Carts, Addresses, Inventory and Health.
+- Private MinIO image upload/read/delete as well as Users/Products image routes tested with real PostgreSQL and MinIO.
+- Redis category cache tested for cold reads, cache hits and one-hour TTL.
+- Intentional security fixes: verify signed JWTs on current-user and refresh endpoints; issue access JWT with the access secret.
+- Prisma enum for gender is MALE/FEMALE/OTHER, while NestJS Zod allows MAN/WOMAN/OTHER. The Go port also accepts those historic input names and writes the correct enum without changing the database.
+- Remaining unported domains and full server-to-server replay remain necessary before production cutover. CI success alone does not establish parity for unported modules.

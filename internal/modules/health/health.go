@@ -40,7 +40,15 @@ func (s *Service) postgres(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := s.db.PingContext(ctx); err != nil {
-		return c.Status(503).JSON(fiber.Map{"status": "error", "details": fiber.Map{"db": fiber.Map{"status": "down"}}})
+		return c.Status(503).JSON(fiber.Map{"status": "error",
+			"info":    fiber.Map{},
+			"error":   fiber.Map{"db": fiber.Map{"status": "down"}},
+			"details": fiber.Map{"db": fiber.Map{"status": "down"}},
+		})
 	}
-	return c.JSON(fiber.Map{"status": "up"})
+	return c.JSON(fiber.Map{"status": "ok",
+		"info":    fiber.Map{"db": fiber.Map{"status": "up"}},
+		"error":   fiber.Map{},
+		"details": fiber.Map{"db": fiber.Map{"status": "up"}},
+	})
 }

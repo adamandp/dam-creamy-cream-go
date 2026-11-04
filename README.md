@@ -91,3 +91,14 @@ These endpoints are **first-pass ports**, not verified behaviorally equivalent t
 - Uploaded images are constrained to 2 MiB and JPEG/PNG/WebP, checked by MIME and actual file content. Successful DB updates clean up the previous **managed MinIO** image; a DB failure removes the just-uploaded object. Legacy Cloudinary/external URLs are never deleted during this transition.
 - `PUBLIC_API_URL` is required in production and must be the external HTTPS origin of this API. In local development it defaults to `http://localhost:<PORT>`. Configure your reverse proxy to expose `/media/...`.
 - This changes the image-host domain without changing the `imageUrl` field. Existing Cloudinary images are not copied automatically; a bulk migration can be done separately if required.
+
+
+## PR #1 integration-test coverage
+
+- All 23 GORM model table/column mappings validated against the five original Prisma SQL migrations in a disposable PostgreSQL instance.
+- HTTP contract integration covers first-batch authentication/session refresh, addresses, users, categories, products/catalog/product information, carts, inventory, and database health.
+- Redis category caching tested with a real disposable Redis server (cold/hit and 1-hour TTL).
+- MinIO private image uploads, HTTP read endpoint, SQL image URL updates and cleanup verified with a live disposable MinIO instance.
+- CI runs gofmt, go mod tidy, go vet and go test.
+
+Legacy data and schema are never migrated automatically. The NestJS Zod gender input accepts MAN/WOMAN while the original PostgreSQL enum stores MALE/FEMALE; Go accepts both input styles and persists the actual enum. JWT verification and correct access-token signing intentionally harden insecure NestJS behavior. Full NestJS-vs-Go cutover replay is still a separate acceptance step after the remaining modules are ported.

@@ -3,6 +3,8 @@ package sessions
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/mileusna/useragent"
 	"strings"
 	"time"
 
@@ -74,7 +76,7 @@ func (s *Service) NewTokens(ctx context.Context, userID, roleID, existing, agent
 		return Tokens{}, err
 	}
 	now := time.Now()
-	info, _ := json.Marshal(map[string]string{"ip": ip, "userAgent": "dummy-" + agent})
+	info, _ := json.Marshal(parseBrowserInfo(ip, "dummy-"+agent))
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if existing != "" {
 			var old domain.UserToken
@@ -141,4 +143,23 @@ func (s *Service) refreshHandler(c fiber.Ctx) error {
 		return err
 	}
 	return c.Status(201).JSON(httpx.Response{Data: fiber.Map{"accessToken": token}})
+}
+
+func parseBrowserInfo(ip, agent string) map[string]string {
+	ua := useragent.Parse(agent)
+	browser := fmt.Sprintf("%s %s", unknown(ua.Name), unknown(ua.Version))
+	osInfo := fmt.Sprintf("%s %s", unknown(ua.OS), unknown(ua.OSVersion))
+	device := "Unknown"
+	if ua.Tablet {
+		device = "tablet"
+	} else if ua.Mobile {
+		device = "mobile"
+	}
+	return map[string]string{"ip": ip, "browser": browser, "os": osInfo, "device": device}
+}
+func unknown(v string) string {
+	if v == "" {
+		return "Unknown"
+	}
+	return v
 }

@@ -92,6 +92,11 @@ func (s *Service) update(c fiber.Ctx) error {
 	if body.IsActive != nil {
 		changes["is_active"] = *body.IsActive
 	}
+	if err := httpx.ValidateUpdate(map[string]any{
+		"product_id": m.ProductID, "quantity": m.Quantity, "reserved_quantity": m.ReservedQuantity, "is_active": m.IsActive,
+	}, changes); err != nil {
+		return err
+	}
 	if len(changes) > 0 {
 		if err := s.db.Model(&m).Updates(changes).Error; err != nil {
 			return err

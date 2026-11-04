@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"sync"
@@ -113,6 +114,13 @@ func TestRealPostgresSessionsRoundTrip(t *testing.T) {
 	var persisted domain.UserToken
 	if err := tx.Where("token = ?", tokens.RefreshToken).First(&persisted).Error; err != nil {
 		t.Fatal(err)
+	}
+	var info map[string]string
+	if err := json.Unmarshal([]byte(persisted.BrowserInfo), &info); err != nil {
+		t.Fatal(err)
+	}
+	if info["browser"] == "" || info["os"] == "" || info["device"] == "" || info["userAgent"] != "" {
+		t.Fatalf("browser information contract: %v", info)
 	}
 	if persisted.BrowserInfo == "" || persisted.ExpiredAt.Before(time.Now()) {
 		t.Errorf("session fields failed to roundtrip: %+v", persisted)
