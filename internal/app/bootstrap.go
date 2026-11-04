@@ -1,0 +1,81 @@
+package app
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/adamandp/dam-creamy-cream-go/internal/config"
+	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
+	"github.com/adamandp/dam-creamy-cream-go/internal/infrastructure"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/addresses"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/auth"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/carts"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/categories"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/health"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/inventory"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/products"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/roles"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/users"
+	"github.com/gofiber/fiber/v3"
+)
+
+type Runtime struct {
+	HTTP  *fiber.App
+	Close func() error
+}
+
+func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runtime, error) {
+	db, err := infrastructure.NewPostgres(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: %w", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+	redisClient, err := infrastructure.NewRedis(ctx, cfg.RedisURL)
+	if err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("redis: %w", err)
+	}
+	httpApp := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
+	httpApp.Use(func(c fiber.Ctx) error {
+		origin := c.Get("Origin")
+		if origin != "" {
+			// Existing NestJS app enables CORS for any origin with credentials.
+			// Lock this down before deploying beyond the existing trust boundary.
+			c.Set("Access-Control-Allow-Origin", origin)
+			c.Set("Access-Control-Allow-Credentials", "true")
+			c.Set("Vary", "Origin")
+			c.Set("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization")
+			c.Set("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS")
+		}
+		if strings.EqualFold(c.Method(), "OPTIONS") {
+			return c.SendStatus(204)
+		}
+		return c.Next()
+	})
+	ses := sessions.NewService(db, cfg.AccessJWTSecret, cfg.RefreshJWTSecret)
+	cloudinary := infrastructure.NewCloudinary(cfg.CloudinaryCloudName, cfg.CloudinaryAPIKey, cfg.CloudinaryAPISecret)
+	roles.NewService(db).Routes(httpApp)
+	users.NewService(db, ses, cloudinary).Routes(httpApp)
+	products.NewService(db, cloudinary).Routes(httpApp)
+	carts.NewService(db, ses).Routes(httpApp)
+	categories.NewService(db, redisClient).Routes(httpApp)
+	inventory.NewService(db).Routes(httpApp)
+	addresses.NewService(db, ses).Routes(httpApp)
+	ses.Routes(httpApp)
+	auth.NewService(db, ses, cfg.Environment == "production").Routes(httpApp)
+	health.NewService(sqlDB).Routes(httpApp)
+	log.Info("dependencies wired", "modules", []string{"roles", "users", "categories", "products", "carts", "inventory", "addresses", "sessions", "auth", "health"})
+	return &Runtime{HTTP: httpApp, Close: func() error {
+		err := redisClient.Close()
+		if x := sqlDB.Close(); err == nil {
+			err = x
+		}
+		return err
+	}}, nil
+}
