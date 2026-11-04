@@ -320,6 +320,10 @@ func (s *Service) updateImage(c fiber.Ctx) error {
 	if err := s.db.First(&u, "id = ?", id).Error; err != nil {
 		return err
 	}
+	previousImageURL := ""
+	if u.ImageURL != nil {
+		previousImageURL = *u.ImageURL
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	imageURL, err := s.upload.Upload(ctx, "users", id, bytes)
@@ -334,10 +338,10 @@ func (s *Service) updateImage(c fiber.Ctx) error {
 		}
 		return err
 	}
-	if u.ImageURL != nil {
+	if previousImageURL != "" {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		if err := s.upload.Delete(cleanupCtx, *u.ImageURL); err != nil {
+		if err := s.upload.Delete(cleanupCtx, previousImageURL); err != nil {
 			slog.Warn("failed to remove previous user image", "error", err)
 		}
 	}

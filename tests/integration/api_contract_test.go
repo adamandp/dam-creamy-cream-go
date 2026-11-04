@@ -139,6 +139,11 @@ func TestFirstPassHTTPContractsOnPrismaSchema(t *testing.T) {
 		t.Fatalf("missing access token or refresh cookie: %v", payload)
 	}
 	testBody(t, testCall(t, app, "POST", "/sessions/refresh", "", cookie, 201))
+	unauthorized := testBody(t, testCall(t, app, "GET", "/addresses/user", "", "", 401))
+	if unauthorized["message"] != "🚪 You are not logged in. Please sign in to continue! 🔐" {
+		t.Errorf("unexpected auth error: %v", unauthorized)
+	}
+	testBody(t, testCall(t, app, "POST", "/auth/dummy-customer-login", "", cookie, 403))
 
 	addr := fmt.Sprintf(`{"userId":%q,"recipientName":"Jane Doe","recipientPhoneNumber":"081234567890","province":"West Java","city":"Bandung","subdistrict":"Cicendo","village":"Pajajaran","postalCode":"40172","address":"Jalan Merdeka","isPrimary":false}`, user.ID.ID)
 	testBody(t, testCall(t, app, "POST", "/addresses", addr, "", 201))
@@ -164,6 +169,14 @@ func TestFirstPassHTTPContractsOnPrismaSchema(t *testing.T) {
 	if !ok || len(data) != 0 {
 		t.Fatalf("cart removal failed: %v", cartPayload)
 	}
+	testBody(t, testCall(t, app, "POST", "/auth/logout", "", cookie, 201))
+	testBody(t, testCall(t, app, "POST", "/sessions/refresh", "", cookie, 401))
+	newLogin := testCall(t, app, "POST", "/auth/dummy-customer-login", "", "", 201)
+	newCookie := newLogin.Header.Get("Set-Cookie")
+	testBody(t, newLogin)
+	testBody(t, testCall(t, app, "POST", "/auth/logout-all", "", newCookie, 201))
+	testBody(t, testCall(t, app, "POST", "/sessions/refresh", "", newCookie, 401))
+
 }
 
 type stubImageStore struct{}

@@ -226,3 +226,7 @@ func RejectNull(c fiber.Ctx, keys ...string) error {
 	}
 	return nil
 }
+
+func Unauthorized() error {
+	return fiber.NewError(401, "🚪 You are not logged in. Please sign in to continue! 🔐")
+}

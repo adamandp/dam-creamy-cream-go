@@ -257,6 +257,10 @@ func (s *Service) updateImage(c fiber.Ctx) error {
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
 		return err
 	}
+	previousImageURL := ""
+	if m.ImageURL != nil {
+		previousImageURL = *m.ImageURL
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	imageURL, err := s.upload.Upload(ctx, "products", id, content)
@@ -274,10 +278,10 @@ func (s *Service) updateImage(c fiber.Ctx) error {
 		}
 		return err
 	}
-	if m.ImageURL != nil {
+	if previousImageURL != "" {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		if err := s.upload.Delete(cleanupCtx, *m.ImageURL); err != nil {
+		if err := s.upload.Delete(cleanupCtx, previousImageURL); err != nil {
 			slog.Warn("failed to remove previous product image", "error", err)
 		}
 	}

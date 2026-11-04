@@ -40,15 +40,15 @@ func (s *Service) sign(userID, roleID string, ttl time.Duration, secret []byte) 
 }
 func (s *Service) parse(token string, secret []byte) (*Claims, error) {
 	if token == "" {
-		return nil, fiber.NewError(401, "Unauthorized")
+		return nil, httpx.Unauthorized()
 	}
 	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(t *jwt.Token) (any, error) { return secret, nil }, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
 	if err != nil || !parsed.Valid {
-		return nil, fiber.NewError(401, "Unauthorized")
+		return nil, httpx.Unauthorized()
 	}
 	claims, ok := parsed.Claims.(*Claims)
 	if !ok || claims.Subject == "" {
-		return nil, fiber.NewError(401, "Unauthorized")
+		return nil, httpx.Unauthorized()
 	}
 	return claims, nil
 }
@@ -61,7 +61,7 @@ func (s *Service) AccessFor(c fiber.Ctx) (*Claims, error) {
 	if strings.HasPrefix(header, "Bearer ") {
 		return s.VerifyAccess(strings.TrimPrefix(header, "Bearer "))
 	}
-	return nil, fiber.NewError(401, "Unauthorized")
+	return nil, httpx.Unauthorized()
 }
 func (s *Service) CookieUser(c fiber.Ctx) (*Claims, error) {
 	return s.VerifyRefresh(c.Cookies("refreshToken"))
@@ -105,7 +105,7 @@ func (s *Service) Refresh(ctx context.Context, token string) (string, error) {
 		return "", err
 	}
 	if count == 0 {
-		return "", fiber.NewError(401, "Unauthorized")
+		return "", httpx.Unauthorized()
 	}
 	return s.sign(claims.Subject, claims.Role, 15*time.Minute, s.accessSecret)
 }

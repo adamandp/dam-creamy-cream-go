@@ -128,7 +128,7 @@ func TestImageRoutesWithRealMinIOAndPostgres(t *testing.T) {
 		raw, err := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if err != nil || resp.StatusCode != 200 || !bytes.Equal(raw, jpg) {
-			t.Fatalf("media response status=%d err=%v bytes=%x", resp.StatusCode, err, raw)
+			t.Fatalf("media URL=%s response status=%d err=%v bytes=%x", imageURL, resp.StatusCode, err, raw)
 		}
 		defer store.Delete(context.Background(), imageURL)
 	}
