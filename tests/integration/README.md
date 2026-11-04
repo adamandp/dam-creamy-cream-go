@@ -1,0 +1,1 @@
+Integration tests belong here, separate from internal/. Add database-backed parity tests after a disposable PostgreSQL fixture with the original Prisma schema is available. Never run integration tests against production data.

@@ -1,0 +1,1 @@
+Run the original NestJS backend and the Fiber backend against disposable copies of the same seeded database, compare HTTP status codes, JSON bodies, cookies, database side effects, and error responses.

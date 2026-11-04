@@ -1,0 +1,66 @@
+name: Go CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify formatting
+        run: |
+          unformatted=$(find cmd internal tests -name '*.go' -print0 | xargs -0 gofmt -l)
+          if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+      - run: go mod tidy
+      - name: Verify committed module files
+        run: git diff --exit-code -- go.mod go.sum
+      - run: go vet ./...
+      - run: go test ./...
+      - name: Prisma-schema PostgreSQL integration test
+        run: |
+          set -euo pipefail
+          docker run -d --name prisma-postgres -p 127.0.0.1:55433:5432 \
+            -e POSTGRES_PASSWORD=fixture-only -e POSTGRES_DB=creamy_test postgres:17-alpine
+          for i in $(seq 1 45); do
+            if docker exec prisma-postgres pg_isready -U postgres -d creamy_test >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec prisma-postgres pg_isready -U postgres -d creamy_test
+          for sql in tests/fixtures/prisma_migrations/*.sql; do
+            echo "Applying source Prisma migration $sql to disposable database"
+            docker exec -i prisma-postgres psql -v ON_ERROR_STOP=1 -U postgres -d creamy_test < "$sql"
+          done
+          PG_INTEGRATION=1 TEST_DATABASE_URL='postgresql://postgres:fixture-only@127.0.0.1:55433/creamy_test?sslmode=disable' \
+            go test ./tests/integration -count=1 -v
+
+      - name: Redis category-cache integration test
+        run: |
+          set -euo pipefail
+          docker run -d --name creamy-redis-test -p 127.0.0.1:6379:6379 redis:7-alpine
+          for i in $(seq 1 30); do
+            if docker exec creamy-redis-test redis-cli ping | grep -q PONG; then break; fi
+            sleep 1
+          done
+          PG_INTEGRATION=1 REDIS_INTEGRATION=1 TEST_REDIS_URL='redis://127.0.0.1:6379/0' \
+            TEST_DATABASE_URL='postgresql://postgres:fixture-only@127.0.0.1:55433/creamy_test?sslmode=disable' \
+            go test ./tests/integration -run TestCategoryRedisCacheAgainstRealServices -count=1 -v
+
+      - name: MinIO integration test
+        run: |
+          # Test-only MinIO server mirror; no production credentials or public ports.
+          # Upstream registries no longer serve this archived server release reliably.
+          docker run -d --name minio-test -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            kotsadm/minio@sha256:d3f84d6fc796f6e847070f57630c94744cd14547ff7854cd5872700bb28cbced server /data --address :9000
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null
+          PG_INTEGRATION=1 MINIO_INTEGRATION=1 TEST_DATABASE_URL='postgresql://postgres:fixture-only@127.0.0.1:55433/creamy_test?sslmode=disable' go test ./tests/integration -count=1 -v
