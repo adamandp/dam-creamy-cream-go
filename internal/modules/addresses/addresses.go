@@ -64,12 +64,24 @@ func validateInput(body CreateInput) error {
 			return err
 		}
 	}
+	if err := httpx.Name(body.RecipientName, 1, 100, "Recipient Name"); err != nil {
+		return err
+	}
+	if err := httpx.Phone(body.RecipientPhoneNumber); err != nil {
+		return err
+	}
 	return nil
 }
 func (s *Service) create(c fiber.Ctx) error {
 	var body CreateInput
-	if err := httpx.Bind(c, &body); err != nil {
+	if err := httpx.BindStrict(c, &body); err != nil {
 		return err
+	}
+	if err := httpx.Required(c, "userId", "recipientName", "recipientPhoneNumber", "province", "city", "subdistrict", "village", "postalCode", "address", "isPrimary"); err != nil {
+		return err
+	}
+	if httpx.ExplicitNull(c, "postalCode") {
+		return fiber.NewError(400, "postalCode must be a string")
 	}
 	if err := validateInput(body); err != nil {
 		return err
@@ -154,7 +166,10 @@ func (s *Service) update(c fiber.Ctx) error {
 		return err
 	}
 	var body UpdateInput
-	if err := httpx.Bind(c, &body); err != nil {
+	if err := httpx.BindStrict(c, &body); err != nil {
+		return err
+	}
+	if err := httpx.RejectNull(c, "userId", "recipientName", "recipientPhoneNumber", "province", "city", "subdistrict", "village", "postalCode", "address", "isPrimary"); err != nil {
 		return err
 	}
 	values := map[string]any{}
@@ -179,6 +194,19 @@ func (s *Service) update(c fiber.Ctx) error {
 	}
 	if body.IsPrimary != nil {
 		values["is_primary"] = *body.IsPrimary
+	}
+	if body.RecipientName != nil {
+		if err := httpx.Name(*body.RecipientName, 1, 100, "Recipient Name"); err != nil {
+			return err
+		}
+	}
+	if body.RecipientPhoneNumber != nil {
+		if err := httpx.Phone(*body.RecipientPhoneNumber); err != nil {
+			return err
+		}
+	}
+	if err := httpx.ValidateUpdate(map[string]any{"user_id": m.UserID, "recipient_name": m.RecipientName, "recipient_phone_number": m.RecipientPhoneNumber, "province": m.Province, "city": m.City, "subdistrict": m.Subdistrict, "village": m.Village, "postal_code": m.PostalCode, "address": m.Address, "is_primary": m.IsPrimary}, values); err != nil {
+		return err
 	}
 	if len(values) > 0 {
 		if err := s.db.Model(&m).Updates(values).Error; err != nil {

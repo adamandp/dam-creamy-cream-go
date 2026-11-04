@@ -1,8 +1,14 @@
 package httpx
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"reflect"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -121,6 +127,102 @@ func NonBlank(v string, min, max int, field string) error {
 	n := len([]rune(strings.TrimSpace(v)))
 	if n < min || n > max {
 		return fiber.NewError(400, fmt.Sprintf("%s must be %d-%d characters", field, min, max))
+	}
+	return nil
+}
+
+func BindStrict(c fiber.Ctx, dst any) error {
+	decoder := json.NewDecoder(bytes.NewReader(c.Body()))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(dst); err != nil {
+		return fiber.NewError(400, "Invalid request body: "+err.Error())
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err == nil {
+		return fiber.NewError(400, "Invalid request body: trailing content")
+	} else if !errors.Is(err, io.EOF) {
+		return fiber.NewError(400, "Invalid request body: "+err.Error())
+	}
+	return nil
+}
+func ExplicitNull(c fiber.Ctx, key string) bool {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(c.Body(), &m) != nil {
+		return false
+	}
+	v, ok := m[key]
+	return ok && bytes.Equal(bytes.TrimSpace(v), []byte("null"))
+}
+func Required(c fiber.Ctx, keys ...string) error {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(c.Body(), &m) != nil {
+		return fiber.NewError(400, "Invalid request body")
+	}
+	for _, k := range keys {
+		_, ok := m[k]
+		if !ok {
+			return fiber.NewError(400, k+" is required")
+		}
+	}
+	return nil
+}
+
+var onlyLetters = regexp.MustCompile("^[A-Za-z\\s]+$")
+var phonePattern = regexp.MustCompile("^[0-9]{10,15}$")
+var emailPattern = regexp.MustCompile("^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[a-zA-Z]{2,}$")
+
+func Name(v string, min, max int, field string) error {
+	if err := NonBlank(v, min, max, field); err != nil {
+		return err
+	}
+	if !onlyLetters.MatchString(v) {
+		return fiber.NewError(400, "Just letters & spaces, no secret codes! 🤨 {Name Only Letters}")
+	}
+	return nil
+}
+func Phone(v string) error {
+	if err := NonBlank(v, 4, 100, "Phone number"); err != nil {
+		return err
+	}
+	if !phonePattern.MatchString(v) {
+		return fiber.NewError(400, "📞 Invalid phone number! Double-check and try again! 🤳 {Invalid Phone}")
+	}
+	return nil
+}
+func Email(v string) error {
+	if err := NonBlank(v, 4, 100, "Email"); err != nil {
+		return err
+	}
+	if !emailPattern.MatchString(v) {
+		return fiber.NewError(400, "📧 Invalid email format! Try something like user@example.com ✉️ {Invalid Email}")
+	}
+	return nil
+}
+func ValidateUpdate(old, changes map[string]any) error {
+	diff := 0
+	same := make([]string, 0)
+	for k, v := range changes {
+		if reflect.DeepEqual(old[k], v) {
+			same = append(same, k)
+		} else {
+			diff++
+		}
+	}
+	if diff == 0 {
+		return fiber.NewError(400, "📭 No changes detected. Everything is already up to date! 👍")
+	}
+	if len(same) > 0 {
+		sort.Strings(same)
+		return fiber.NewError(400, "📭 No changes detected in "+strings.Join(same, ", ")+" fields. Everything’s already up to date!")
+	}
+	return nil
+}
+
+func RejectNull(c fiber.Ctx, keys ...string) error {
+	for _, key := range keys {
+		if ExplicitNull(c, key) {
+			return fiber.NewError(400, key+" must not be null")
+		}
 	}
 	return nil
 }

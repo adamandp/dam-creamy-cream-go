@@ -75,7 +75,10 @@ func (s *Service) categoryExists(id string) error {
 }
 func (s *Service) create(c fiber.Ctx) error {
 	var b CreateInput
-	if err := httpx.Bind(c, &b); err != nil {
+	if err := httpx.BindStrict(c, &b); err != nil {
+		return err
+	}
+	if err := httpx.Required(c, "categoryId", "name", "description", "price", "isActive"); err != nil {
 		return err
 	}
 	if err := httpx.UUID(b.CategoryID); err != nil {
@@ -137,7 +140,10 @@ func (s *Service) update(c fiber.Ctx) error {
 		return err
 	}
 	var b UpdateInput
-	if err := httpx.Bind(c, &b); err != nil {
+	if err := httpx.BindStrict(c, &b); err != nil {
+		return err
+	}
+	if err := httpx.RejectNull(c, "categoryId", "name", "price", "isActive"); err != nil {
 		return err
 	}
 	updates := map[string]any{}
@@ -176,6 +182,15 @@ func (s *Service) update(c fiber.Ctx) error {
 	}
 	if b.IsActive != nil {
 		updates["is_active"] = *b.IsActive
+	}
+	if httpx.ExplicitNull(c, "description") {
+		updates["description"] = nil
+	}
+	if httpx.ExplicitNull(c, "discountId") {
+		updates["discount_id"] = nil
+	}
+	if err := httpx.ValidateUpdate(map[string]any{"category_id": m.CategoryID, "discount_id": valueOrNil(m.DiscountID), "name": m.Name, "description": valueOrNil(m.Description), "price": m.Price, "is_active": m.IsActive}, updates); err != nil {
+		return err
 	}
 	if len(updates) > 0 {
 		if err := s.db.Model(&m).Updates(updates).Error; err != nil {
@@ -483,4 +498,11 @@ func (s *Service) information(c fiber.Ctx) error {
 	}
 	lines = append(lines, "", "📦 Product Details", "• Size: "+details.Size, "• Storage: "+details.Storage, "• Shelf life: "+details.ShelfLife, "", "⚡ Why Choose This Product?", info.WhyChoose)
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Product"), Data: fiber.Map{"information": strings.TrimSpace(strings.Join(lines, "\n"))}})
+}
+
+func valueOrNil(v *string) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }

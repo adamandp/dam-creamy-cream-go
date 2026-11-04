@@ -53,7 +53,7 @@ type UserToken struct {
 	ID
 	UserID      string    `gorm:"column:user_id;type:uuid" json:"userId"`
 	Token       string    `gorm:"column:token" json:"-"`
-	BrowserInfo string    `gorm:"column:browser_info" json:"browserInfo"`
+	BrowserInfo string    `gorm:"column:browserInfo" json:"browserInfo"`
 	ExpiredAt   time.Time `gorm:"column:expiredAt" json:"expiredAt"`
 	Stamp
 }

@@ -2,6 +2,7 @@ package users
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"regexp"
@@ -82,6 +83,7 @@ type UpdateInput struct {
 	Username    *string `json:"username"`
 	Email       *string `json:"email"`
 	PhoneNumber *string `json:"phoneNumber"`
+	BirthDate   *string `json:"birthDate"`
 	Password    *string `json:"password"`
 	FullName    *string `json:"fullName"`
 	Gender      *string `json:"gender"`
@@ -148,7 +150,10 @@ func (s *Service) update(c fiber.Ctx) error {
 		return err
 	}
 	var body UpdateInput
-	if err := httpx.Bind(c, &body); err != nil {
+	if err := httpx.BindStrict(c, &body); err != nil {
+		return err
+	}
+	if err := httpx.RejectNull(c, "roleId", "username", "fullName", "password", "isActive"); err != nil {
 		return err
 	}
 	updates := map[string]any{}
@@ -166,34 +171,47 @@ func (s *Service) update(c fiber.Ctx) error {
 		return err
 	}
 	if body.Username != nil {
-		if err := httpx.NonBlank(*body.Username, 5, 50, "username"); err != nil {
+		if err := httpx.Name(*body.Username, 5, 50, "username"); err != nil {
 			return err
 		}
 		updates["username"] = *body.Username
 	}
 	if body.Email != nil {
-		if err := httpx.NonBlank(*body.Email, 4, 100, "email"); err != nil {
+		if err := httpx.Email(*body.Email); err != nil {
 			return err
 		}
 		updates["email"] = *body.Email
 	}
 	if body.PhoneNumber != nil {
-		if err := httpx.NonBlank(*body.PhoneNumber, 4, 100, "phoneNumber"); err != nil {
+		if err := httpx.Phone(*body.PhoneNumber); err != nil {
 			return err
 		}
 		updates["phone_number"] = *body.PhoneNumber
 	}
+	if body.BirthDate != nil {
+		birthDate, err := parseBirthDate(*body.BirthDate)
+		if err != nil {
+			return fiber.NewError(400, "Invalid birthDate")
+		}
+		updates["birth_date"] = birthDate
+	}
 	if body.FullName != nil {
-		if err := httpx.NonBlank(*body.FullName, 1, 100, "fullName"); err != nil {
+		if err := httpx.Name(*body.FullName, 1, 100, "fullName"); err != nil {
 			return err
 		}
 		updates["full_name"] = *body.FullName
 	}
 	if body.Gender != nil {
-		if *body.Gender != "MAN" && *body.Gender != "WOMAN" && *body.Gender != "OTHER" {
+		switch *body.Gender {
+		case "MAN", "MALE":
+			updates["gender"] = "MALE"
+		case "WOMAN", "FEMALE":
+			updates["gender"] = "FEMALE"
+		case "OTHER":
+			updates["gender"] = "OTHER"
+		default:
 			return fiber.NewError(400, "Invalid gender")
 		}
-		updates["gender"] = *body.Gender
 	}
 	if body.IsActive != nil {
 		updates["is_active"] = *body.IsActive
@@ -207,6 +225,21 @@ func (s *Service) update(c fiber.Ctx) error {
 			return err
 		}
 		updates["password"] = string(hash)
+	}
+	if httpx.ExplicitNull(c, "email") {
+		updates["email"] = nil
+	}
+	if httpx.ExplicitNull(c, "phoneNumber") {
+		updates["phone_number"] = nil
+	}
+	if httpx.ExplicitNull(c, "gender") {
+		updates["gender"] = nil
+	}
+	if httpx.ExplicitNull(c, "birthDate") {
+		updates["birth_date"] = nil
+	}
+	if err := httpx.ValidateUpdate(map[string]any{"role_id": u.RoleID, "username": u.Username, "email": valueOrNil(u.Email), "phone_number": valueOrNil(u.PhoneNumber), "full_name": u.FullName, "gender": valueOrNil(u.Gender), "is_active": u.IsActive, "birth_date": dateOrNil(u.BirthDate)}, updates); err != nil {
+		return err
 	}
 	if len(updates) > 0 {
 		if err := s.db.Model(&u).Updates(updates).Error; err != nil {
@@ -323,4 +356,27 @@ func (s *Service) remove(c fiber.Ctx) error {
 		return httpx.NotFound("User")
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("delete", "User")})
+}
+
+func valueOrNil(v *string) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func dateOrNil(v *time.Time) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+func parseBirthDate(v string) (time.Time, error) {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02"} {
+		d, err := time.Parse(layout, v)
+		if err == nil {
+			return d, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid date")
 }

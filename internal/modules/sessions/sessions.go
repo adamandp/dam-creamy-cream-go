@@ -99,7 +99,7 @@ func (s *Service) Refresh(ctx context.Context, token string) (string, error) {
 		return "", err
 	}
 	var count int64
-	if err := s.db.WithContext(ctx).Model(&domain.UserToken{}).Where("token = ? AND expiredAt > ?", token, time.Now()).Count(&count).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&domain.UserToken{}).Where("token = ? AND \"expiredAt\" > ?", token, time.Now()).Count(&count).Error; err != nil {
 		return "", err
 	}
 	if count == 0 {

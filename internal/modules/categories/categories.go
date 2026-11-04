@@ -23,7 +23,7 @@ func NewService(db *gorm.DB, cache *redis.Client) *Service { return &Service{db:
 type CreateInput struct {
 	Name        string  `json:"name"`
 	Description *string `json:"description"`
-	IsActive    bool    `json:"isActive"`
+	IsActive    *bool   `json:"isActive"`
 }
 type UpdateInput struct {
 	Name        *string `json:"name"`
@@ -44,7 +44,13 @@ func (s *Service) create(c fiber.Ctx) error {
 	if err := httpx.Bind(c, &body); err != nil {
 		return err
 	}
-	if err := httpx.NonBlank(body.Name, 1, 100, "name"); err != nil {
+	if err := httpx.Required(c, "name", "description", "isActive"); err != nil {
+		return err
+	}
+	if body.IsActive == nil {
+		return fiber.NewError(400, "isActive must be a boolean")
+	}
+	if err := httpx.Name(body.Name, 1, 100, "name"); err != nil {
 		return err
 	}
 	if body.Description != nil {
@@ -52,7 +58,7 @@ func (s *Service) create(c fiber.Ctx) error {
 			return err
 		}
 	}
-	m := domain.Category{Name: body.Name, Description: body.Description, IsActive: body.IsActive}
+	m := domain.Category{Name: body.Name, Description: body.Description, IsActive: *body.IsActive}
 	if err := s.db.Create(&m).Error; err != nil {
 		return err
 	}
@@ -111,9 +117,12 @@ func (s *Service) update(c fiber.Ctx) error {
 	if err := httpx.Bind(c, &body); err != nil {
 		return err
 	}
+	if err := httpx.RejectNull(c, "name", "isActive"); err != nil {
+		return err
+	}
 	changes := map[string]any{}
 	if body.Name != nil {
-		if err := httpx.NonBlank(*body.Name, 1, 100, "name"); err != nil {
+		if err := httpx.Name(*body.Name, 1, 100, "name"); err != nil {
 			return err
 		}
 		changes["name"] = *body.Name
@@ -126,6 +135,12 @@ func (s *Service) update(c fiber.Ctx) error {
 	}
 	if body.IsActive != nil {
 		changes["is_active"] = *body.IsActive
+	}
+	if httpx.ExplicitNull(c, "description") {
+		changes["description"] = nil
+	}
+	if err := httpx.ValidateUpdate(map[string]any{"name": m.Name, "description": valueOrNil(m.Description), "is_active": m.IsActive}, changes); err != nil {
+		return err
 	}
 	if len(changes) > 0 {
 		if err := s.db.Model(&m).Updates(changes).Error; err != nil {
@@ -147,4 +162,11 @@ func (s *Service) remove(c fiber.Ctx) error {
 		return httpx.NotFound("category")
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("delete", "category")})
+}
+
+func valueOrNil(v *string) any {
+	if v == nil {
+		return nil
+	}
+	return *v
 }

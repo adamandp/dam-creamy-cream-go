@@ -22,6 +22,23 @@ jobs:
         run: git diff --exit-code -- go.mod go.sum
       - run: go vet ./...
       - run: go test ./...
+      - name: Prisma-schema PostgreSQL integration test
+        run: |
+          set -euo pipefail
+          docker run -d --name prisma-postgres -p 127.0.0.1:55433:5432 \
+            -e POSTGRES_PASSWORD=fixture-only -e POSTGRES_DB=creamy_test postgres:17-alpine
+          for i in $(seq 1 45); do
+            if docker exec prisma-postgres pg_isready -U postgres -d creamy_test >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          docker exec prisma-postgres pg_isready -U postgres -d creamy_test
+          for sql in tests/fixtures/prisma_migrations/*.sql; do
+            echo "Applying source Prisma migration $sql to disposable database"
+            docker exec -i prisma-postgres psql -v ON_ERROR_STOP=1 -U postgres -d creamy_test < "$sql"
+          done
+          PG_INTEGRATION=1 TEST_DATABASE_URL='postgresql://postgres:fixture-only@127.0.0.1:55433/creamy_test?sslmode=disable' \
+            go test ./tests/integration -run 'TestPrismaGORMColumnParity|TestRealPostgresSessionsRoundTrip' -count=1 -v
+
       - name: MinIO integration test
         run: |
           # Test-only MinIO server mirror; no production credentials or public ports.
