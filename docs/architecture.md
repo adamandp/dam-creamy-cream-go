@@ -2,7 +2,7 @@
 
 Creamy Cream Go uses a modular monolith with explicit constructor injection.
 
-`text
+```text
 cmd/api/main.go
    |
 internal/app/bootstrap.go
@@ -14,7 +14,7 @@ internal/app/bootstrap.go
    |-- categories / products / carts / inventory
    |-- discounts / productdiscounts / vouchers / uservouchers
    |-- media / health
-`
+```
 
 Each feature defines its own HTTP routes and services. The composition root constructs dependencies once, shares connections, and handles shutdown. GORM models use explicit table and column names from the application schema. Tests live under tests/, outside application source.
 

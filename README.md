@@ -19,19 +19,19 @@ Go 1.26+, PostgreSQL with the Creamy Cream schema, Redis, and MinIO.
 
 ## Run locally
 
-`bash
+```bash
 cp .env.example .env
 # Configure PostgreSQL, Redis, MinIO and JWT credentials.
 go mod download
 go run ./cmd/api
-`
+```
 
 Run validation:
 
-`bash
+```bash
 go vet ./...
 go test ./...
-`
+```
 
 The application does not call AutoMigrate or alter database tables on startup. Use a separate development database for write API testing.
 
@@ -63,7 +63,7 @@ See [API reference](docs/api.md) for supported routes, input requirements and re
 
 ## Project structure
 
-`text
+```text
 cmd/api/                     server entrypoint
 internal/app/                dependency wiring
 internal/config/             environment settings
@@ -75,7 +75,7 @@ tests/unit/                  unit tests
 tests/integration/           live-service tests with disposable data
 tests/fixtures/db-schema/    database fixtures
 docs/                        API and architecture documentation
-`
+```
 
 ## Images
 
@@ -86,3 +86,7 @@ User and product image uploads accept JPEG, PNG or WebP up to 2 MiB. MinIO bucke
 CI checks formatting, go mod tidy, go vet and go test. It runs integration tests against isolated PostgreSQL, Redis and MinIO services, covering GORM schema compatibility, JWT sessions, catalog, cart, promotions, category cache, and image persistence.
 
 Never run destructive tests using production credentials. Before a public deployment, configure secrets, validate all required endpoints, and restrict CORS origins.
+
+## Migration provenance and parity
+
+The source of truth for existing API behavior is the NestJS/Prisma backend (`adamandp/dam-creamy-cream-be`, branch `master`). Go idioms and the agreed MinIO replacement are allowed; response/business behavior remains compatible except for documented bug/security fixes. See [the parity tracker](docs/parity.md), [NestJS route inventory](docs/nest-routes.md), and [the side-by-side test](tests/e2e/README.md). Of the 19 compared promotion requests, 18 match exactly and one fixes the broken NestJS `GET /user-vouchers/user` route ordering.
