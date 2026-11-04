@@ -7,12 +7,12 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 | NestJS module | Go module | Status | Notes |
 |---|---|---|---|
 | Roles | roles | FIRST PASS | CRUD and pagination. |
-| Users | users | FIRST PASS | Profile, password and Cloudinary image; field-level DTO validation needs parity tests. |
+| Users | users | FIRST PASS | Profile, password and MinIO image; field-level DTO validation needs parity tests. |
 | Session | sessions | FIRST PASS | JWT refresh, token persistence; security corrections must be reviewed. |
 | Auth | auth | FIRST PASS | Existing dummy login only, logout & logout-all. |
 | Addresses | addresses | FIRST PASS | Primary address transaction; address update requires behavior comparison. |
 | Categories | categories | FIRST PASS | Redis caching, 1h TTL; cache invalidation unchanged. |
-| Products | products | FIRST PASS | CRUD, catalog aggregation, Cloudinary uploads. |
+| Products | products | FIRST PASS | CRUD, catalog aggregation, MinIO uploads. |
 | Product (singular) | products | FIRST PASS | `/product/:id`, `/product/information/:id` preserved. |
 | Carts | carts | FIRST PASS | Add/remove transaction, discounted read. |
 | Inventory | inventory | FIRST PASS | Query and update routes. |
@@ -37,7 +37,7 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 - Run all current NestJS endpoints against seeded disposable DB and replay same requests against Go.
 - Check exact status codes, message strings, field omission vs `null`, pagination and date serialization.
 - Test auth across NestJS/Go, JWT existing cookies and refresh token lifecycle.
-- Test Redis cache cold/hit/errors and Cloudinary upload/destroy via a non-production cloud account.
+- Test Redis cache cold/hit/errors and MinIO upload/read/delete/cleanup against a disposable MinIO bucket.
 - Test concurrent cart add/remove and complete checkout transaction after orders module is ported.
 
 ## Known differences in the first-pass port
@@ -45,7 +45,7 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 - Current-user cookie is JWT-verified instead of decoded without signature verification.
 - Refresh endpoint issues an access JWT using access secret, correcting a likely NestJS mistake.
 - Body validation is hand-written rather than a complete port of each Zod schema; error messages and nullable-field handling are not guaranteed identical.
-- Cloudinary uploads use signed Cloudinary REST requests rather than the Node SDK; real integration test is pending.
+- Cloudinary is replaced with MinIO per request. The public image URLs now point to the Go /media route; existing Cloudinary URLs remain stored and untouched. MinIO live integration tests are required before cutover.
 - GORM model relationship tags for association preloading are not yet exhaustive; query implementations use explicit joins where required.
 - Role pagination keeps the original `Category retrieved` response message from `roles.service.ts`, even though it looks incorrect.
 

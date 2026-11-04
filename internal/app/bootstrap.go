@@ -15,6 +15,7 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/categories"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/health"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/inventory"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/media"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/products"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/roles"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
@@ -58,11 +59,17 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 		}
 		return c.Next()
 	})
+	store, err := infrastructure.NewMinIO(ctx, cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey, cfg.MinIOBucket, cfg.PublicAPIURL, cfg.MinIOUseSSL)
+	if err != nil {
+		_ = redisClient.Close()
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("minio: %w", err)
+	}
 	ses := sessions.NewService(db, cfg.AccessJWTSecret, cfg.RefreshJWTSecret)
-	cloudinary := infrastructure.NewCloudinary(cfg.CloudinaryCloudName, cfg.CloudinaryAPIKey, cfg.CloudinaryAPISecret)
 	roles.NewService(db).Routes(httpApp)
-	users.NewService(db, ses, cloudinary).Routes(httpApp)
-	products.NewService(db, cloudinary).Routes(httpApp)
+	users.NewService(db, ses, store).Routes(httpApp)
+	products.NewService(db, store).Routes(httpApp)
+	media.NewService(store).Routes(httpApp)
 	carts.NewService(db, ses).Routes(httpApp)
 	categories.NewService(db, redisClient).Routes(httpApp)
 	inventory.NewService(db).Routes(httpApp)
@@ -70,7 +77,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 	ses.Routes(httpApp)
 	auth.NewService(db, ses, cfg.Environment == "production").Routes(httpApp)
 	health.NewService(sqlDB).Routes(httpApp)
-	log.Info("dependencies wired", "modules", []string{"roles", "users", "categories", "products", "carts", "inventory", "addresses", "sessions", "auth", "health"})
+	log.Info("dependencies wired", "modules", []string{"roles", "users", "categories", "products", "carts", "inventory", "addresses", "sessions", "auth", "health", "media"})
 	return &Runtime{HTTP: httpApp, Close: func() error {
 		err := redisClient.Close()
 		if x := sqlDB.Close(); err == nil {

@@ -23,7 +23,7 @@ var (
 	ErrInvalidImage = errors.New("only JPEG, PNG and WebP images are allowed")
 	ErrImageTooLarge = errors.New("image exceeds 2 MiB")
 	ErrImageNotFound = errors.New("image not found")
-	filenamePattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(jpg|png|webp)$`)
+	filenamePattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|png|webp)$`)
 )
 
 type MinIOStore struct {

@@ -3,11 +3,14 @@ package products
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
@@ -18,10 +21,10 @@ import (
 
 type Service struct {
 	db     *gorm.DB
-	upload *infrastructure.Cloudinary
+	upload infrastructure.ImageStore
 }
 
-func NewService(db *gorm.DB, upload *infrastructure.Cloudinary) *Service {
+func NewService(db *gorm.DB, upload infrastructure.ImageStore) *Service {
 	return &Service{db: db, upload: upload}
 }
 func (s *Service) Routes(app fiber.Router) {
@@ -239,17 +242,29 @@ func (s *Service) updateImage(c fiber.Ctx) error {
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
 		return err
 	}
-	if m.ImageURL != nil {
-		if err := s.upload.Delete(context.Background(), id); err != nil {
-			return fiber.NewError(400, "Failed to delete existing image")
-		}
-	}
-	imageURL, err := s.upload.Upload(context.Background(), id, f.Filename, content)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	imageURL, err := s.upload.Upload(ctx, "products", id, content)
 	if err != nil {
+		if errors.Is(err, infrastructure.ErrInvalidImage) || errors.Is(err, infrastructure.ErrImageTooLarge) {
+			return fiber.NewError(400, "Only image files are allowed!")
+		}
 		return fiber.NewError(400, "📤 Oops! Failed to upload "+id+". Please try again later! 🚧")
 	}
-	if err := s.db.Model(&m).Update("image_url", imageURL).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&m).Update("image_url", imageURL).Error; err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if cleanupErr := s.upload.Delete(cleanupCtx, imageURL); cleanupErr != nil {
+			slog.Warn("failed to remove orphaned product image", "error", cleanupErr)
+		}
 		return err
+	}
+	if m.ImageURL != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if err := s.upload.Delete(cleanupCtx, *m.ImageURL); err != nil {
+			slog.Warn("failed to remove previous product image", "error", err)
+		}
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("update", "Product Image")})
 }

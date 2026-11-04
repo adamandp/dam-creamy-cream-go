@@ -6,16 +6,17 @@ cmd/api/main.go
 internal/app/bootstrap.go     <- only composition root creates infrastructure and services
        +-- infrastructure.NewPostgres   -> *gorm.DB (single pool)
        +-- infrastructure.NewRedis      -> *redis.Client (single pool)
-       +-- infrastructure.NewCloudinary -> *Cloudinary (single HTTP client)
+       +-- infrastructure.NewMinIO -> *MinIOStore (private S3 bucket, public /media route)
        +-- sessions.NewService(db, accessSecret, refreshSecret)
        +-- roles.NewService(db)
-       +-- users.NewService(db, sessions, cloudinary)
+       +-- users.NewService(db, sessions, minioStore)
        +-- auth.NewService(db, sessions)
        +-- addresses.NewService(db, sessions)
-       +-- products.NewService(db, cloudinary)
+       +-- products.NewService(db, minioStore)
        +-- carts.NewService(db, sessions)
        +-- categories.NewService(db, redis)
        +-- inventory.NewService(db)
+       +-- media.NewService(minioStore) -> GET /media/:scope/:id/:filename
        +-- health.NewService(sqlDB)
 ```
 

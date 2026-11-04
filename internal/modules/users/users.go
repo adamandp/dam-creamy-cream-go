@@ -3,8 +3,10 @@ package users
 import (
 	"context"
 	"io"
+	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
@@ -18,10 +20,10 @@ import (
 type Service struct {
 	db       *gorm.DB
 	sessions *sessions.Service
-	upload   *infrastructure.Cloudinary
+	upload   infrastructure.ImageStore
 }
 
-func NewService(db *gorm.DB, s *sessions.Service, upload *infrastructure.Cloudinary) *Service {
+func NewService(db *gorm.DB, s *sessions.Service, upload infrastructure.ImageStore) *Service {
 	return &Service{db: db, sessions: s, upload: upload}
 }
 func (s *Service) Routes(app fiber.Router) {
@@ -285,17 +287,26 @@ func (s *Service) updateImage(c fiber.Ctx) error {
 	if err := s.db.First(&u, "id = ?", id).Error; err != nil {
 		return err
 	}
-	if u.ImageURL != nil {
-		if err := s.upload.Delete(context.Background(), id); err != nil {
-			return fiber.NewError(400, "Failed to delete existing image")
-		}
-	}
-	imageURL, err := s.upload.Upload(context.Background(), id, file.Filename, bytes)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	imageURL, err := s.upload.Upload(ctx, "users", id, bytes)
 	if err != nil {
 		return fiber.NewError(400, "Failed to upload user image")
 	}
-	if err := s.db.Model(&u).Update("image_url", imageURL).Error; err != nil {
+	if err := s.db.WithContext(ctx).Model(&u).Update("image_url", imageURL).Error; err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if cleanupErr := s.upload.Delete(cleanupCtx, imageURL); cleanupErr != nil {
+			slog.Warn("failed to remove orphaned user image", "error", cleanupErr)
+		}
 		return err
+	}
+	if u.ImageURL != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if err := s.upload.Delete(cleanupCtx, *u.ImageURL); err != nil {
+			slog.Warn("failed to remove previous user image", "error", err)
+		}
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("update", "User Image")})
 }
