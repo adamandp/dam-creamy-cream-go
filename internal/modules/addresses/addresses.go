@@ -1,13 +1,12 @@
 package addresses
 
 import (
-	"context"
-
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Service struct {
@@ -93,27 +92,42 @@ func (s *Service) create(c fiber.Ctx) error {
 	if !actor.Admin && actor.UserID != body.UserID {
 		return httpx.Forbidden()
 	}
-	err = s.db.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
-		var userCount int64
-		if err := tx.Model(&domain.User{}).Where("id = ?", body.UserID).Count(&userCount).Error; err != nil {
+	err = s.db.WithContext(c.Context()).Transaction(func(tx *gorm.DB) error {
+		// Lock per user, not per address: concurrent creates and primary
+		// switches serialize even before the user's first address exists.
+		var user domain.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&user, "id = ?", body.UserID).Error; err != nil {
 			return err
-		}
-		if userCount == 0 {
-			return httpx.NotFound("User")
 		}
 		var count int64
 		if err := tx.Model(&domain.Address{}).Where("user_id = ?", body.UserID).Count(&count).Error; err != nil {
 			return err
 		}
-		if count == 0 {
-			body.IsPrimary = true
-		}
-		if body.IsPrimary {
-			if err := tx.Model(&domain.Address{}).Where("user_id = ? AND is_primary = true", body.UserID).Update("is_primary", false).Error; err != nil {
+		// Repair pre-existing zero/multiple-primary records from the old
+		// implementation when a new address is added.
+		var existingPrimaries int64
+		if count > 0 {
+			if err := tx.Model(&domain.Address{}).
+				Where("user_id = ? AND is_primary = true", body.UserID).
+				Count(&existingPrimaries).Error; err != nil {
 				return err
 			}
 		}
-		return tx.Create(&domain.Address{UserID: body.UserID, RecipientName: body.RecipientName, RecipientPhoneNumber: body.RecipientPhoneNumber, Province: body.Province, City: body.City, Subdistrict: body.Subdistrict, Village: body.Village, PostalCode: body.PostalCode, Address: body.Address, IsPrimary: body.IsPrimary}).Error
+		makePrimary := body.IsPrimary || existingPrimaries != 1
+		if makePrimary {
+			if err := tx.Model(&domain.Address{}).
+				Where("user_id = ? AND is_primary = true", body.UserID).
+				Update("is_primary", false).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Create(&domain.Address{
+			UserID: body.UserID, RecipientName: body.RecipientName,
+			RecipientPhoneNumber: body.RecipientPhoneNumber, Province: body.Province,
+			City: body.City, Subdistrict: body.Subdistrict, Village: body.Village,
+			PostalCode: body.PostalCode, Address: body.Address, IsPrimary: makePrimary,
+		}).Error
 	})
 	if err != nil {
 		return err
@@ -225,13 +239,50 @@ func (s *Service) update(c fiber.Ctx) error {
 			return err
 		}
 	}
-	if err := httpx.ValidateUpdate(map[string]any{"user_id": m.UserID, "recipient_name": m.RecipientName, "recipient_phone_number": m.RecipientPhoneNumber, "province": m.Province, "city": m.City, "subdistrict": m.Subdistrict, "village": m.Village, "postal_code": m.PostalCode, "address": m.Address, "is_primary": m.IsPrimary}, values); err != nil {
-		return err
-	}
-	if len(values) > 0 {
-		if err := s.db.Model(&m).Updates(values).Error; err != nil {
+	// Serializing all address writes through the owner row prevents two
+	// concurrent primary switches from committing as two primary addresses.
+	err = s.db.WithContext(c.Context()).Transaction(func(tx *gorm.DB) error {
+		var owner domain.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&owner, "id = ?", m.UserID).Error; err != nil {
 			return err
 		}
+		var current domain.Address
+		if err := tx.First(&current, "id = ?", id).Error; err != nil {
+			return err
+		}
+		// Requests may have queued behind an earlier delete; never change
+		// ownership or rely on a stale snapshot.
+		if current.UserID != m.UserID {
+			return httpx.Forbidden()
+		}
+		if body.IsPrimary != nil && !*body.IsPrimary && current.IsPrimary {
+			return fiber.NewError(409, "Choose another primary address before unsetting the current one")
+		}
+		if err := httpx.ValidateUpdate(map[string]any{
+			"user_id": current.UserID, "recipient_name": current.RecipientName,
+			"recipient_phone_number": current.RecipientPhoneNumber,
+			"province":               current.Province, "city": current.City,
+			"subdistrict": current.Subdistrict, "village": current.Village,
+			"postal_code": current.PostalCode, "address": current.Address,
+			"is_primary": current.IsPrimary,
+		}, values); err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			return nil
+		}
+		if body.IsPrimary != nil && *body.IsPrimary {
+			if err := tx.Model(&domain.Address{}).
+				Where("user_id = ? AND id <> ? AND is_primary = true", current.UserID, id).
+				Update("is_primary", false).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&current).Updates(values).Error
+	})
+	if err != nil {
+		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("update", "Address")})
 }
@@ -240,26 +291,58 @@ func (s *Service) remove(c fiber.Ctx) error {
 	if err := httpx.UUID(id); err != nil {
 		return err
 	}
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var m domain.Address
-		if err := tx.First(&m, "id = ?", id).Error; err != nil {
+	// Read only to find which user row to lock. The target is re-read
+	// inside the transaction and rechecked for ownership.
+	var target domain.Address
+	if err := s.db.First(&target, "id = ?", id).Error; err != nil {
+		return err
+	}
+	actor, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
+	if !actor.Admin && actor.UserID != target.UserID {
+		return httpx.Forbidden()
+	}
+	err = s.db.WithContext(c.Context()).Transaction(func(tx *gorm.DB) error {
+		var owner domain.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&owner, "id = ?", target.UserID).Error; err != nil {
 			return err
 		}
-		actor, err := s.sessions.Actor(c)
-		if err != nil {
+		var current domain.Address
+		if err := tx.First(&current, "id = ?", id).Error; err != nil {
 			return err
 		}
-		if !actor.Admin && actor.UserID != m.UserID {
+		if current.UserID != target.UserID {
 			return httpx.Forbidden()
 		}
 		var count int64
-		if err := tx.Model(&domain.Address{}).Where("user_id = ?", m.UserID).Count(&count).Error; err != nil {
+		if err := tx.Model(&domain.Address{}).
+			Where("user_id = ?", current.UserID).Count(&count).Error; err != nil {
 			return err
 		}
 		if count <= 1 {
 			return fiber.NewError(409, "❌ Cannot delete Address! At least one Address is required to keep the system functional. 🔒")
 		}
-		return tx.Delete(&m).Error
+		// When deleting the primary, deterministically nominate a survivor.
+		// Both operations commit together and cannot race another address write.
+		if current.IsPrimary {
+			var next domain.Address
+			if err := tx.Where("user_id = ? AND id <> ?", current.UserID, id).
+				Order("id ASC").First(&next).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&domain.Address{}).
+				Where("user_id = ? AND id <> ? AND is_primary = true", current.UserID, next.ID.ID).
+				Update("is_primary", false).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&next).Update("is_primary", true).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Delete(&current).Error
 	})
 	if err != nil {
 		return err

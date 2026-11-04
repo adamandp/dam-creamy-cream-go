@@ -6,6 +6,7 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Service struct {
@@ -72,39 +73,62 @@ func (s *Service) update(c fiber.Ctx) error {
 	if err := httpx.UUID(id); err != nil {
 		return err
 	}
-	var m domain.Inventory
-	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
-		return err
-	}
 	var body UpdateInput
 	if err := httpx.Bind(c, &body); err != nil {
 		return err
 	}
-	changes := map[string]any{}
+	// Reject invalid quantities without touching persistent state.
+	if body.Quantity != nil && *body.Quantity < 0 {
+		return fiber.NewError(400, "quantity must not be negative")
+	}
+	if body.ReservedQuantity != nil && *body.ReservedQuantity < 0 {
+		return fiber.NewError(400, "reservedQuantity must not be negative")
+	}
 	if body.ProductID != nil {
 		if err := httpx.UUID(*body.ProductID); err != nil {
 			return err
 		}
-		changes["product_id"] = *body.ProductID
 	}
-	if body.Quantity != nil {
-		changes["quantity"] = *body.Quantity
-	}
-	if body.ReservedQuantity != nil {
-		changes["reserved_quantity"] = *body.ReservedQuantity
-	}
-	if body.IsActive != nil {
-		changes["is_active"] = *body.IsActive
-	}
-	if err := httpx.ValidateUpdate(map[string]any{
-		"product_id": m.ProductID, "quantity": m.Quantity, "reserved_quantity": m.ReservedQuantity, "is_active": m.IsActive,
-	}, changes); err != nil {
-		return err
-	}
-	if len(changes) > 0 {
-		if err := s.db.Model(&m).Updates(changes).Error; err != nil {
+	returnErr := s.db.WithContext(c.Context()).Transaction(func(tx *gorm.DB) error {
+		// Serializes stock edits (and future checkout stock reservations)
+		// on the same inventory row, so partial updates cannot combine to
+		// produce reserved_quantity > quantity.
+		var m domain.Inventory
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&m, "id = ?", id).Error; err != nil {
 			return err
 		}
+		changes := map[string]any{}
+		if body.ProductID != nil {
+			changes["product_id"] = *body.ProductID
+		}
+		quantity, reserved := m.Quantity, m.ReservedQuantity
+		if body.Quantity != nil {
+			quantity = *body.Quantity
+			changes["quantity"] = quantity
+		}
+		if body.ReservedQuantity != nil {
+			reserved = *body.ReservedQuantity
+			changes["reserved_quantity"] = reserved
+		}
+		if body.IsActive != nil {
+			changes["is_active"] = *body.IsActive
+		}
+		if quantity < 0 || reserved < 0 || reserved > quantity {
+			return fiber.NewError(409, "reservedQuantity cannot exceed nonnegative quantity")
+		}
+		if err := httpx.ValidateUpdate(map[string]any{
+			"product_id": m.ProductID, "quantity": m.Quantity,
+			"reserved_quantity": m.ReservedQuantity, "is_active": m.IsActive,
+		}, changes); err != nil {
+			return err
+		}
+		if len(changes) > 0 {
+			return tx.Model(&m).Updates(changes).Error
+		}
+		return nil
+	})
+	if returnErr != nil {
+		return returnErr
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("update", "Inventory")})
 }

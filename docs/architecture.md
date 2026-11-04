@@ -40,3 +40,11 @@ Product Cart, Catalog and Detail use the common \`internal/modules/pricing\` act
 Refreshing customer sessions still uses signed HS256 JWTs and a database-backed UserToken record. Each new refresh JWT has a cryptographically random 128-bit jti, compactly serialized to remain under the original token VARCHAR(255) limit. Refresh JWTs omit optional typ and iat; access JWTs are unchanged. This avoids same-second duplicate token collisions without a database migration.
 
 Category list cache uses Redis key \`categories:revision\` as a shared generation number. Pages are stored at \`categories:v<revision>:<page>:<limit>\` with one-hour TTL; successful writes increment revision, even across horizontally scaled instances. Cache operations are time-bounded and PostgreSQL reads remain available when Redis is down.
+
+## PR #2 Checkout foundational consistency (pre-PR #3)
+
+Every Address mutating route acquires a PostgreSQL row lock on its owning User (the shared serialization point even before a first Address exists), then performs the primary-address reassignment or last-address guard in the same transaction. A first Address is primary; choosing a new primary demotes the old; deleting a primary promotes another; trying to remove the sole primary without choosing another returns 409. This is an HTTP data-integrity invariant, not yet a new database constraint.
+
+Inventory PATCH validates both stock quantities together under a PostgreSQL \`FOR UPDATE\` lock on the target inventory row. Negative or over-reserved inventory cannot be written via the API. When implementing Checkout/Orders in PR #3, keep these invariants inside the reservation transaction and lock the same row.
+
+\`LogoutAll\` verifies the supplied refresh JWT against its current UserToken row and user state, then locks the authorizing token record and deletes the user's sessions atomically. Replay of a previously deleted token is unauthorized and cannot act on other sessions.

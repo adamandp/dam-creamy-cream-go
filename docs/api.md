@@ -10,12 +10,12 @@ All routes are relative to the backend root. List endpoints accept page (default
 | /sessions | Access-token refresh |
 | /roles | Public reads; admin-only create, update, delete |
 | /users | Admin-only list; detail self/admin; profile requires active bearer; own safe profile edits; password ONLY through PUT with current password; image self/admin; role/status mutation and delete admin-only |
-| /addresses | Create self/admin; global list admin-only; detail/update/delete owner/admin; /user reads current verified refresh session cookie; ownership transfer prohibited |
+| /addresses | Create self/admin; global list admin-only; detail/update/delete owner/admin; at least one address and exactly one primary per user enforced by transactions; /user reads active refresh cookie; ownership transfer prohibited |
 | /categories | Public reads and Redis cache; create/update/delete admin-only |
 | /products | Public catalog/detail; create/update/delete/product-image changes admin-only |
 | /product | Detail and product information |
 | /carts | Current-user cart read/add/remove via refresh cookie verified against active PostgreSQL session |
-| /inventory | Public read/lookup, update admin-only |
+| /inventory | Public read/lookup; admin-only PATCH with nonnegative quantity/reservedQuantity and reservedQuantity <= quantity, validated under a PostgreSQL row lock |
 | /products/catalog, /product/:id | Public product pricing; applies discounts only when the product-discount assignment is active **and** the discount is within its inclusive start/end period |
 
 | /health | HTTP and PostgreSQL status |
@@ -81,6 +81,12 @@ The /user endpoint returns each claim with its associated voucher under the vouc
 Role creation/renaming/deletion is admin-only. Customers can edit their own safe profile fields, but cannot set roleId or isActive or edit another user's account. Password changes require the authenticated account owner **and the existing password** through PUT /users/:id/password; PATCH /users/:id rejects password changes for both user and admin. User directory GET /users requires admin, and GET /users/:id is self/admin only. User deletion is admin-only. Role changes invalidate access tokens with the old role claim. Admin accounts must already exist in the database or be provisioned out-of-band; there is no public bootstrap-admin endpoint.
 
 Categories and Products mutations and product-image changes are admin-only; Inventory PATCH is admin-only. Their public read routes are preserved for storefront browsing. Address creation requires a current bearer-authenticated actor and matching userId unless admin; listing all addresses is admin-only, and by-id reads/updates/deletions require owner/admin. Address userId reassignment through PATCH is forbidden (including by admin); the existing at-least-one-address deletion rule remains. GET /addresses/user and all Cart /user endpoints keep the existing refresh-cookie interface but verify signature **and** current user/role/active account **and** the backing unexpired UserToken row; logout/logout-all immediately revokes these routes, even while the JWT signature remains valid. /sessions/refresh uses this same validation.
+
+**Checkout foundation invariants (PR #2):** Address create/update/delete serialize on the owning User row (\`FOR UPDATE\`) so simultaneous requests cannot establish two primary addresses. The first address is automatically primary; selecting another demotes the previous primary atomically; attempting to unset the only primary returns 409. When a primary address is deleted, another existing address becomes primary; deleting the user's final address returns 409. New address creates also repair any already-invalid zero/multiple-primary state left by the earlier code, without a database migration. The \`isPrimary\` switch is a deliberate correction to legacy Nest behavior.
+
+Inventory PATCH accepts only \`quantity >= 0\`, \`reservedQuantity >= 0\`, and \`reservedQuantity <= quantity\`. Negative inputs return 400; inconsistent available/reserved state returns 409. Updates lock the Inventory row in a PostgreSQL transaction to prevent concurrent partial updates violating these constraints. Future PR #3 Checkout stock reservations must use the same row-locking invariant.
+
+\`POST /auth/logout-all\` requires a **currently active refresh session**, including a matching unexpired UserToken database row, not merely a valid JWT signature. Revoked/replayed tokens return 401 and cannot delete sessions belonging to the same user. Authorized logout-all still revokes all active sessions atomically. The dedicated dummy login is unchanged.
 
 The deliberate dummy-customer-login endpoint and its known test account credentials are **unchanged by this security hardening**. It remains a development/testing feature and must not be exposed as a real customer authentication flow in production.
 

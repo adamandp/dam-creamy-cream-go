@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/golang-jwt/jwt/v5"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Service struct {
@@ -167,18 +168,26 @@ func (s *Service) Logout(ctx context.Context, token string) error {
 	return nil
 }
 func (s *Service) LogoutAll(ctx context.Context, token string) error {
-	claims, err := s.VerifyRefresh(token)
+	// A valid JWT signature is not proof that this login session still exists.
+	// Logout-all may only be authorized by an active, non-revoked refresh token.
+	claims, err := s.ActiveRefresh(ctx, token)
 	if err != nil {
 		return err
 	}
-	res := s.db.WithContext(ctx).Where("user_id = ?", claims.Subject).Delete(&domain.UserToken{})
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return httpx.NotFound("Token")
-	}
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Lock the authorizing row so a concurrent logout cannot revoke it
+		// between validation and the all-sessions deletion.
+		var active domain.UserToken
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("token = ? AND user_id = ? AND \"expiredAt\" > ?", token, claims.Subject, time.Now().UTC()).
+			First(&active).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return httpx.Unauthorized()
+			}
+			return err
+		}
+		return tx.Where("user_id = ?", claims.Subject).Delete(&domain.UserToken{}).Error
+	})
 }
 func (s *Service) Routes(app fiber.Router) { app.Post("/sessions/refresh", s.refreshHandler) }
 func (s *Service) refreshHandler(c fiber.Ctx) error {
