@@ -51,7 +51,7 @@ Checkout response: HTTP 201 with `data.orderId`, `totalPrice`, `discountAmount`,
 1. Authenticate against current active user and role. Require `order.userId` to be the actual actor, and ensure `order.addressId` belongs to that user. A valid session is insufficient to use another account's address.
 2. Reject duplicate product/voucher IDs, invalid UUIDs, quantity outside 1..100, non-finite/negative shipping fees, unknown JSON fields, and more than two vouchers.
 3. Lock the customer's Cart and CartItems using PostgreSQL `FOR UPDATE`; verify that every checkout line exists and has sufficient quantity. Read product price from the database and require active product.
-4. Verify active ProductDiscount relationship for each explicitly requested discount, lock Discount rows, validate date windows, per-order limit and remaining redemption quota. Cart, Catalog and Checkout share the same percentage/fixed pricing helper. The `PRICE` discount means price override bounded by original product price.
+4. Verify active ProductDiscount relationship for each explicitly requested discount, lock Discount rows, validate date windows, per-order limit and remaining redemption quota. Cart, Catalog, Product Detail and Checkout share one calculator for PERCENTAGE, FIXED and PRICE. PRICE is a final-price override (never an amount subtracted), including a valid zero-price override. FREE_ITEM leaves the paid product price untouched and creates a separate bonus line. The calculator rounds to currency cents so storefront quotes and persisted order-item prices match. The `PRICE` discount means price override bounded by original product price.
 5. Lock Vouchers and UserVoucher claims, require current validity, ownership, `CLAIMED` status, capacity, minimum purchase, and at most one voucher for each `CHECKOUT` / `SHIPPING` group. Apply fixed/percentage rewards with zero floor.
 6. Materialize `FREE_ITEM` rewards as zero-cost order lines; include reward product inventory in required quantities (even if the reward does not appear in Cart).
 7. Lock inventory rows in sorted product UUID order with PostgreSQL `FOR UPDATE`, reject inactive or insufficient stock, and increment `reserved_quantity`. This matches the stock invariant enforced by Inventory PATCH in PR #2.
@@ -71,3 +71,11 @@ Checkout response: HTTP 201 with `data.orderId`, `totalPrice`, `discountAmount`,
 - `TestCheckoutConcurrentBuyersCannotDoubleRedeemVoucher`: a limited voucher is claimed by two distinct buyers; exactly one Order commits and the claim/counter is consistent.
 - `TestCheckoutFreeGiftRewardsAlsoReserveStock`: a free reward can be granted from both discount and voucher; insufficient gift stock rejects checkout, and successful checkout reserves all free and paid units.
 - Existing PR #1/2 tests and independent NestJS-vs-Go promotion parity runner are retained. No database migrations and no changes to the deliberate dummy-customer-login.
+
+
+## PR #3 follow-up: PRICE / FREE_ITEM consistency (2026-11-05)
+
+- Fixed an HTTP/PostgreSQL-reproduced price mismatch: for an original price of 10,000 with discount type PRICE and value 7,000, Cart/Catalog/Detail formerly displayed 3,000 while Checkout charged 7,000. All four paths now use the same shared pricing calculation and return 7,000.
+- FREE_ITEM is a separate, zero-cost reward order line with real inventory reservation; its optional value is *never* subtracted from the purchased product price.
+- Shared price semantics: PERCENTAGE subtracts a percentage; FIXED subtracts a fixed amount (floor zero); PRICE overrides the final paid price (capped by the original price, zero allowed); FREE_ITEM has no per-line discountPrice.
+- Regression test TestAllDiscountTypesMatchCheckout exercises all four paths against a real PostgreSQL schema for nine cases, including fractional percentages, price overrides of 0 or above the original price, and FREE_ITEM with both present and null values. The pricing helper has unit tests independent of PostgreSQL.

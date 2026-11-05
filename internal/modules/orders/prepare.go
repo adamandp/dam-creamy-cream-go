@@ -119,19 +119,15 @@ func (s *Service) prepareCheckout(tx *gorm.DB, body CheckoutInput, now time.Time
 			disc := discounts[*p.item.DiscountID]
 			p.discount = &disc
 			switch disc.DiscountType {
-			case "PERCENTAGE", "FIXED":
+			case "PERCENTAGE", "FIXED", "PRICE":
 				if disc.Value == nil || !saneMoney(*disc.Value) {
 					return cart, data, unavailable("Invalid discount value")
 				}
-				discounted := pricing.DiscountPrice(p.product.Price, disc.DiscountType, disc.Value)
-				if discounted != nil {
-					p.unitFinal = amount(*discounted)
+				// Shared with Catalog, Detail and Cart; PRICE is an override,
+				// not the amount to subtract from the original product price.
+				if discounted := pricing.DiscountPrice(p.product.Price, disc.DiscountType, disc.Value); discounted != nil {
+					p.unitFinal = *discounted
 				}
-			case "PRICE":
-				if disc.Value == nil || !saneMoney(*disc.Value) {
-					return cart, data, unavailable("Invalid discounted price")
-				}
-				p.unitFinal = amount(min(p.product.Price, *disc.Value))
 			case "FREE_ITEM":
 				if err := addGift(data.allQuantities, &data.gifts, disc.ProductID, disc.Quantity); err != nil {
 					return cart, data, err
