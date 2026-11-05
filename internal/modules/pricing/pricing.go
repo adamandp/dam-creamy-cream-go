@@ -5,7 +5,11 @@ package pricing
 import "math"
 
 // ActiveAssociation is the shared SQL predicate against aliases pd and d.
-const ActiveAssociation = "pd.is_active = true AND d.start_date <= ? AND d.end_date >= ?"
+// The storefront must never advertise a discount that Checkout will reject
+// because its global redemption quota has already been exhausted.
+// Remaining quota is a live snapshot: Checkout still checks and locks the
+// discount row for the actual requested quantity during its transaction.
+const ActiveAssociation = "pd.is_active = true AND d.start_date <= ? AND d.end_date >= ? AND d.max_redeemed > 0 AND d.redeemed_count < d.max_redeemed"
 
 // DiscountPrice is the price of the PAID product line, not a reward value.
 // PRICE is a final price override (bounded by the original price); FIXED is

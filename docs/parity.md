@@ -121,3 +121,8 @@ Ported the existing NestJS Orders CQRS semantics to Go without inventing a NestJ
 ### PR #3 follow-up — shared PRICE and FREE_ITEM semantics (2026-11-05)
 
 Corrected a previously untested mismatch between PR #2 Cart/Catalog/Detail and PR #3 Checkout. Discount type PRICE is a server-side *final price override*, not a fixed amount to deduct. FREE_ITEM never changes the paid line price and is materialized as a free reward with inventory reservation at Checkout. All three price-changing types use the shared calculator and consistent cent rounding. Real PostgreSQL integration regression TestAllDiscountTypesMatchCheckout compares Cart, Catalog, Detail, saved Checkout amount and reward inventory across nine scenarios; unit test TestDiscountPriceSemantics covers the same boundary logic. No database migration, dummy-login change, or change to parent PR branches.
+
+
+### PR #3 follow-up — exhausted discount storefront eligibility (2026-11-05)
+
+Public Cart/Catalog/Detail price queries now exclude discounts whose global redeemedCount >= maxRedeemed or maxRedeemed <= 0, matching the Checkout eligibility guard. Previously, storefronts advertised an exhausted promo which Checkout correctly rejected. The underlying Checkout row-lock, per-order cap and requested-quantity quota check remain authoritative; this is a deliberate inherited pricing correctness fix rather than a guaranteed quote reservation. Tests: TestCartCatalogDetailDiscountEligibility (available/exhausted/over/zero/reopened quota) and TestQuotaExhaustionAcrossStorefrontAndCheckout (all three reads, 409 without Order persistence, successful final-redemption checkout and subsequent suppression). No source NestJS, schema or dummy-login change.

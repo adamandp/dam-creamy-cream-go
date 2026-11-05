@@ -110,4 +110,26 @@ func TestCartCatalogDetailDiscountEligibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("zero-value discount", nil)
+	// The storefront used to advertise a discount that Checkout refused
+	// because the redemption quota had already been consumed.
+	if err := tx.Model(&d).Updates(map[string]any{"discount_type": "PRICE", "value": float64(7000), "max_redeemed": 10, "redeemed_count": 9}).Error; err != nil {
+		t.Fatal(err)
+	}
+	check("one redemption remaining", float64(7000))
+	if err := tx.Model(&d).Update("redeemed_count", 10).Error; err != nil {
+		t.Fatal(err)
+	}
+	check("quota exhausted", nil)
+	if err := tx.Model(&d).Update("redeemed_count", 11).Error; err != nil {
+		t.Fatal(err)
+	}
+	check("quota over-redeemed", nil)
+	if err := tx.Model(&d).Updates(map[string]any{"max_redeemed": 0, "redeemed_count": 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	check("zero quota configured", nil)
+	if err := tx.Model(&d).Updates(map[string]any{"max_redeemed": 1, "redeemed_count": 0}).Error; err != nil {
+		t.Fatal(err)
+	}
+	check("quota available again", float64(7000))
 }
