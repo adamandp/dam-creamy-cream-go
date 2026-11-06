@@ -32,7 +32,7 @@ Unit tests use a fake HTTP server to verify outbound request, form fields, heade
 
 ## Authorization and production boundaries
 
-NestJS ShipmentsController does not authenticate list/detail/status routes. PR #4 deliberately requires signed current access JWT with owner/admin checks on reads and admin-only writes. Status updates do not automatically mutate Order.status or Payment.status, preserving NestJS mutation scope.
+NestJS UpdateStatusShipmentDto strips unknown status-body keys; this port retains that acceptance while still requiring a valid status. NestJS ShipmentsController does not authenticate list/detail/status routes. PR #4 deliberately requires signed current access JWT with owner/admin checks on reads and admin-only writes. Status updates do not automatically mutate Order.status or Payment.status, preserving NestJS mutation scope.
 
 Important production limitations:
 

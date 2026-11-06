@@ -91,7 +91,7 @@ func (s *Service) updateStatus(c fiber.Ctx) error {
 	var in struct {
 		Status string `json:"status"`
 	}
-	if err := httpx.BindStrict(c, &in); err != nil {
+	if err := httpx.Bind(c, &in); err != nil {
 		return err
 	}
 	if err := httpx.Required(c, "status"); err != nil {

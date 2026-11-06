@@ -90,7 +90,7 @@ func TestShipmentOwnershipAdminStatusAndPendingPaymentScaffold(t *testing.T) {
 	testBody(t, testCallAs(t, app, ownerToken, "PATCH", url, `{"status":"SHIPPED"}`, "", 403))
 	testBody(t, testCallAs(t, app, adminToken, "PATCH", url, `{"status":"INVALID"}`, "", 400))
 	testBody(t, testCallAs(t, app, adminToken, "PATCH", url, `{}`, "", 400))
-	testBody(t, testCallAs(t, app, adminToken, "PATCH", url, `{"status":"SHIPPED"}`, "", 200))
+	testBody(t, testCallAs(t, app, adminToken, "PATCH", url, `{"status":"SHIPPED","legacyExtra":"ignored"}`, "", 200))
 	if err := tx.First(&shipment, "id = ?", shipment.ID.ID).Error; err != nil || shipment.Status != "SHIPPED" {
 		t.Fatalf("shipment status not persisted: %v %+v", err, shipment)
 	}
