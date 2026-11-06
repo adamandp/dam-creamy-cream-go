@@ -9,20 +9,20 @@ import (
 )
 
 type Config struct {
-	Port             string
-	Environment      string
-	DatabaseURL      string
-	RedisURL         string
-	AccessJWTSecret  string
-	RefreshJWTSecret string
-	MinIOEndpoint    string
-	MinIOAccessKey   string
-	MinIOSecretKey   string
-	MinIOBucket      string
-	MinIOUseSSL      bool
-	PublicAPIURL     string
+	Port              string
+	Environment       string
+	DatabaseURL       string
+	RedisURL          string
+	AccessJWTSecret   string
+	RefreshJWTSecret  string
+	MinIOEndpoint     string
+	MinIOAccessKey    string
+	MinIOSecretKey    string
+	MinIOBucket       string
+	MinIOUseSSL       bool
+	PublicAPIURL      string
 	RajaOngkirBaseURL string
-	RajaOngkirAPIKey string
+	RajaOngkirAPIKey  string
 
 	CORSAllowedOrigins []string
 }
@@ -42,20 +42,20 @@ func Load() (Config, error) {
 		return Config{}, errors.New("MINIO_USE_SSL must be true or false")
 	}
 	cfg := Config{
-		Port:             port,
-		Environment:      env("NODE_ENV", "development"),
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		RedisURL:         os.Getenv("REDIS_URL"),
-		AccessJWTSecret:  os.Getenv("ACCESS_JWT_SECRET"),
-		RefreshJWTSecret: os.Getenv("REFRESH_JWT_SECRET"),
-		MinIOEndpoint:    os.Getenv("MINIO_ENDPOINT"),
-		MinIOAccessKey:   os.Getenv("MINIO_ACCESS_KEY"),
-		MinIOSecretKey:   os.Getenv("MINIO_SECRET_KEY"),
-		MinIOBucket:      env("MINIO_BUCKET", "creamy-cream"),
-		MinIOUseSSL:      ssl,
-		PublicAPIURL:     env("PUBLIC_API_URL", "http://localhost:"+port),
+		Port:              port,
+		Environment:       env("NODE_ENV", "development"),
+		DatabaseURL:       os.Getenv("DATABASE_URL"),
+		RedisURL:          os.Getenv("REDIS_URL"),
+		AccessJWTSecret:   os.Getenv("ACCESS_JWT_SECRET"),
+		RefreshJWTSecret:  os.Getenv("REFRESH_JWT_SECRET"),
+		MinIOEndpoint:     os.Getenv("MINIO_ENDPOINT"),
+		MinIOAccessKey:    os.Getenv("MINIO_ACCESS_KEY"),
+		MinIOSecretKey:    os.Getenv("MINIO_SECRET_KEY"),
+		MinIOBucket:       env("MINIO_BUCKET", "creamy-cream"),
+		MinIOUseSSL:       ssl,
+		PublicAPIURL:      env("PUBLIC_API_URL", "http://localhost:"+port),
 		RajaOngkirBaseURL: os.Getenv("RAJAONGKIR_BASE_URL"),
-		RajaOngkirAPIKey: os.Getenv("RAJAONGKIR_API_KEY"),
+		RajaOngkirAPIKey:  os.Getenv("RAJAONGKIR_API_KEY"),
 
 		CORSAllowedOrigins: allowedOrigins,
 	}
@@ -72,7 +72,6 @@ func Load() (Config, error) {
 		if cfg.RajaOngkirBaseURL != "" && !strings.HasPrefix(cfg.RajaOngkirBaseURL, "https://") {
 			return Config{}, errors.New("RAJAONGKIR_BASE_URL must use HTTPS in production")
 		}
-
 		if len(cfg.CORSAllowedOrigins) == 0 {
 			return Config{}, errors.New("FRONTEND_ORIGINS must explicitly list trusted origins in production")
 		}
