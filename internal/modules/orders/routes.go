@@ -73,10 +73,10 @@ func (in *ShipmentInput) UnmarshalJSON(raw []byte) error {
 		return fmt.Errorf("shipment.estimated: %w", err)
 	}
 	*in = ShipmentInput{
-		Courier: wire.Courier,
-		Service: wire.Service,
-		Cost: wire.Cost,
-		Estimated: estimated,
+		Courier:     wire.Courier,
+		Service:     wire.Service,
+		Cost:        wire.Cost,
+		Estimated:   estimated,
 		Description: wire.Description,
 	}
 	return nil
