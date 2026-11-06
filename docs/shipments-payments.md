@@ -9,7 +9,7 @@ Source of truth: adamandp/dam-creamy-cream-be (NestJS ShipmentsController, Shipm
 | GET | /shipments?page=1&limit=10 | Admin access JWT | Paginated shipment rows; 404 on empty collection as NestJS |
 | GET | /shipments/:id | Owner or admin access JWT | Shipment JSON in data; UUID validation |
 | PATCH | /shipments/:id/status | Admin access JWT | Status PENDING, SHIPPED, DELIVERED, or CANCELLED |
-| POST | /shipments/cost | Public, as NestJS | Origin/destination/weight body, RajaOngkir URL-encoded quote, response with message/status/data |
+| POST | /shipments/cost | Public, as NestJS | HTTP 201; Origin/destination/weight body, RajaOngkir URL-encoded quote, response with message/status/data |
 | POST | /payments | Public inert scaffold | HTTP 201, literal "This action adds a new payment" |
 | GET | /payments | Public inert scaffold | HTTP 200, literal "This action returns all payments" |
 | GET | /payments/:id | Public inert scaffold | HTTP 200, literal "This action returns a #N payment" |

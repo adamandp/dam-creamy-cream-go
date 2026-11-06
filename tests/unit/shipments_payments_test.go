@@ -126,7 +126,7 @@ func TestShippingCostEndpointValidationAndLegacyPaymentScaffold(t *testing.T) {
 	if quote.calls != 0 {
 		t.Fatal("invalid quote input reached provider")
 	}
-	out := call("POST", "/shipments/cost", `{"origin":"1","destination":2,"weight":100}`, 200)
+	out := call("POST", "/shipments/cost", `{"origin":"1","destination":2,"weight":100}`, 201)
 	var response struct {
 		Status int `json:"status"`
 		Data   []struct {

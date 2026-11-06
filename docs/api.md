@@ -110,5 +110,5 @@ POST /orders/checkout exposes an explicit authenticated API contract for the exi
 - GET /shipments?page=1&limit=10: current admin access JWT, paginated Shipment rows, 404 if empty (NestJS behavior).
 - GET /shipments/:id: owner or admin access JWT. Invalid UUID 400, missing 404, foreign owner 403.
 - PATCH /shipments/:id/status: admin access JWT, body {"status":"SHIPPED"}, enum PENDING/SHIPPED/DELIVERED/CANCELLED; changes only Shipment status.
-- POST /shipments/cost: public body {"origin":123,"destination":456,"weight":1000}; sends a server-only key to RajaOngkir; returns {message,status,data}. Missing config 503, upstream failure 502. Does not validate Checkout shipping fees.
+- POST /shipments/cost: HTTP 201, public body {"origin":123,"destination":456,"weight":1000}; sends a server-only key to RajaOngkir; returns {message,status,data}. Missing config 503, upstream failure 502. Does not validate Checkout shipping fees.
 - Payments POST/GET/PATCH/DELETE endpoints reproduce NestJS scaffold literal text only; there is no payment mutation. See [PR #4 contract](shipments-payments.md).

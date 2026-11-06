@@ -185,5 +185,5 @@ func (s *Service) cost(c fiber.Ctx) error {
 	if err != nil {
 		return fiber.NewError(502, "Unable to retrieve shipping costs")
 	}
-	return c.JSON(fiber.Map{"message": quote.Message, "status": quote.Status, "data": quote.Data})
+	return c.Status(201).JSON(fiber.Map{"message": quote.Message, "status": quote.Status, "data": quote.Data})
 }
