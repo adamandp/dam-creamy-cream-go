@@ -17,10 +17,12 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/inventory"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/media"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/orders"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/payments"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/productdiscounts"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/products"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/roles"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/shipments"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/users"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/uservouchers"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/vouchers"
@@ -33,6 +35,10 @@ type Runtime struct {
 }
 
 func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runtime, error) {
+	quotes, err := shipments.NewRajaOngkir(cfg.RajaOngkirBaseURL, cfg.RajaOngkirAPIKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("shipping quotes: %w", err)
+	}
 	db, err := infrastructure.NewPostgres(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: %w", err)
@@ -63,6 +69,8 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 	vouchers.NewService(db, ses).Routes(httpApp)
 	uservouchers.NewService(db, ses).Routes(httpApp)
 	orders.NewService(db, ses).Routes(httpApp)
+	payments.NewService().Routes(httpApp)
+	shipments.NewService(db, ses, quotes).Routes(httpApp)
 	media.NewService(store).Routes(httpApp)
 	carts.NewService(db, ses).Routes(httpApp)
 	categories.NewService(db, redisClient, ses).Routes(httpApp)
@@ -71,7 +79,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 	ses.Routes(httpApp)
 	auth.NewService(db, ses, cfg.Environment == "production").Routes(httpApp)
 	health.NewService(sqlDB).Routes(httpApp)
-	log.Info("dependencies wired", "modules", []string{"roles", "users", "categories", "products", "carts", "inventory", "addresses", "sessions", "auth", "health", "media", "discounts", "product-discounts", "vouchers", "user-vouchers", "orders"})
+	log.Info("dependencies wired", "modules", []string{"roles", "users", "categories", "products", "carts", "inventory", "addresses", "sessions", "auth", "health", "media", "discounts", "product-discounts", "vouchers", "user-vouchers", "orders", "payments", "shipments"})
 	return &Runtime{HTTP: httpApp, Close: func() error {
 		err := redisClient.Close()
 		if x := sqlDB.Close(); err == nil {

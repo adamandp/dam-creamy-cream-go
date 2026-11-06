@@ -21,6 +21,8 @@ type Config struct {
 	MinIOBucket      string
 	MinIOUseSSL      bool
 	PublicAPIURL     string
+	RajaOngkirBaseURL string
+	RajaOngkirAPIKey string
 
 	CORSAllowedOrigins []string
 }
@@ -52,6 +54,8 @@ func Load() (Config, error) {
 		MinIOBucket:      env("MINIO_BUCKET", "creamy-cream"),
 		MinIOUseSSL:      ssl,
 		PublicAPIURL:     env("PUBLIC_API_URL", "http://localhost:"+port),
+		RajaOngkirBaseURL: os.Getenv("RAJAONGKIR_BASE_URL"),
+		RajaOngkirAPIKey: os.Getenv("RAJAONGKIR_API_KEY"),
 
 		CORSAllowedOrigins: allowedOrigins,
 	}
@@ -61,7 +65,14 @@ func Load() (Config, error) {
 	if cfg.MinIOEndpoint == "" || cfg.MinIOAccessKey == "" || cfg.MinIOSecretKey == "" {
 		return Config{}, errors.New("MINIO_ENDPOINT, MINIO_ACCESS_KEY and MINIO_SECRET_KEY are required")
 	}
+	if (cfg.RajaOngkirBaseURL == "") != (cfg.RajaOngkirAPIKey == "") {
+		return Config{}, errors.New("RAJAONGKIR_BASE_URL and RAJAONGKIR_API_KEY must be configured together")
+	}
 	if cfg.Environment == "production" {
+		if cfg.RajaOngkirBaseURL != "" && !strings.HasPrefix(cfg.RajaOngkirBaseURL, "https://") {
+			return Config{}, errors.New("RAJAONGKIR_BASE_URL must use HTTPS in production")
+		}
+
 		if len(cfg.CORSAllowedOrigins) == 0 {
 			return Config{}, errors.New("FRONTEND_ORIGINS must explicitly list trusted origins in production")
 		}
