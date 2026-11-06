@@ -1,10 +1,14 @@
 package orders
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/promotionutil"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
@@ -35,17 +39,49 @@ type CheckoutInput struct {
 		VoucherIDs []string `json:"voucherIds"`
 	} `json:"order"`
 	OrderItems []CheckoutItem `json:"orderItems"`
-	Shipment   struct {
-		Courier     string    `json:"courier"`
-		Service     string    `json:"service"`
-		Cost        float64   `json:"cost"`
-		Estimated   time.Time `json:"estimated"`
-		Description *string   `json:"description"`
-	} `json:"shipment"`
-	Payment struct {
+	Shipment   ShipmentInput  `json:"shipment"`
+	Payment    struct {
 		Method string `json:"method"`
 	} `json:"payment"`
 }
+
+// ShipmentInput preserves the Go time.Time field used by checkout callers,
+// while accepting the original NestJS z.coerce.date() JSON representations.
+type ShipmentInput struct {
+	Courier     string    `json:"courier"`
+	Service     string    `json:"service"`
+	Cost        float64   `json:"cost"`
+	Estimated   time.Time `json:"estimated"`
+	Description *string   `json:"description"`
+}
+
+func (in *ShipmentInput) UnmarshalJSON(raw []byte) error {
+	var wire struct {
+		Courier     string          `json:"courier"`
+		Service     string          `json:"service"`
+		Cost        float64         `json:"cost"`
+		Estimated   json.RawMessage `json:"estimated"`
+		Description *string         `json:"description"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return err
+	}
+	estimated, err := promotionutil.ParseDate(wire.Estimated)
+	if err != nil {
+		return fmt.Errorf("shipment.estimated: %w", err)
+	}
+	*in = ShipmentInput{
+		Courier: wire.Courier,
+		Service: wire.Service,
+		Cost: wire.Cost,
+		Estimated: estimated,
+		Description: wire.Description,
+	}
+	return nil
+}
+
 type CheckoutItem struct {
 	ProductID  string  `json:"productId"`
 	DiscountID *string `json:"discountId"`

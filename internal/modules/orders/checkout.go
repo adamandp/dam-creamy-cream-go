@@ -27,8 +27,8 @@ func validateCheckout(b CheckoutInput, who sessions.Actor) error {
 	if err := httpx.UUID(b.Order.AddressID); err != nil {
 		return err
 	}
-	if len(b.OrderItems) < 1 || len(b.OrderItems) > 50 {
-		return badInput("orderItems must contain 1..50 products")
+	if len(b.OrderItems) < 1 {
+		return badInput("orderItems must contain at least one product")
 	}
 	if len(b.Order.VoucherIDs) > 2 {
 		return badInput("at most two voucherIds are allowed")
@@ -48,8 +48,8 @@ func validateCheckout(b CheckoutInput, who sessions.Actor) error {
 		if err := httpx.UUID(item.ProductID); err != nil {
 			return err
 		}
-		if item.Quantity < 1 || item.Quantity > 100 {
-			return badInput("item quantity must be 1..100")
+		if item.Quantity < 1 {
+			return badInput("item quantity must be positive")
 		}
 		if items[item.ProductID] {
 			return badInput("duplicate productId in orderItems")

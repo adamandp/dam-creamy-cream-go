@@ -328,7 +328,7 @@ func (s *Service) updateImage(c fiber.Ctx) error {
 	if u.ImageURL != nil {
 		previousImageURL = *u.ImageURL
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
 	defer cancel()
 	imageURL, err := s.upload.Upload(ctx, "users", id, bytes)
 	if err != nil {

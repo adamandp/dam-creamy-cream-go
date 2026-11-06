@@ -191,7 +191,7 @@ func (s *Service) LogoutAll(ctx context.Context, token string) error {
 }
 func (s *Service) Routes(app fiber.Router) { app.Post("/sessions/refresh", s.refreshHandler) }
 func (s *Service) refreshHandler(c fiber.Ctx) error {
-	token, err := s.Refresh(context.Background(), c.Cookies("refreshToken"))
+	token, err := s.Refresh(c.Context(), c.Cookies("refreshToken"))
 	if err != nil {
 		return err
 	}

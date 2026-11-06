@@ -51,6 +51,7 @@ The application does not call AutoMigrate or alter database tables on startup. U
 | MINIO_BUCKET | Private image bucket |
 | MINIO_USE_SSL | HTTPS to MinIO |
 | PUBLIC_API_URL | Public API origin for image URLs |
+| FRONTEND_ORIGINS | Comma-separated trusted frontend origins for credentialed CORS; required in production |
 
 ## Modules
 
@@ -86,7 +87,9 @@ User and product image uploads accept JPEG, PNG or WebP up to 2 MiB. MinIO bucke
 
 CI checks formatting, go mod tidy, go vet and go test. It runs integration tests against isolated PostgreSQL, Redis and MinIO services, covering GORM schema compatibility, JWT sessions, catalog, cart, promotions, category cache, and image persistence. The PR #2 security follow-up adds tests for catalog/inventory admin authorization, address owner-only access, private user directory/details, password PATCH bypass prevention, and immediate refresh-cookie revocation for Carts/Addresses after logout. Dummy login is intentionally unchanged. The later PR #2 correctness batch also unifies Cart/Catalog/Detail discount eligibility, gives refresh JWTs unique compact jti identifiers under the legacy VARCHAR(255) column limit, and versions category Redis cache pages on writes. All three have real-service regression coverage. Before PR #3, another PR #2 patch serializes primary-address transitions and inventory stock changes with PostgreSQL locks and rejects logout-all using revoked session tokens. This correction adds concurrent HTTP integration tests without changing dummy login or database schema.
 
-Never run destructive tests using production credentials. Before a public deployment, configure secrets, validate all required endpoints, and restrict CORS origins.
+Never run destructive tests using production credentials. Before a public deployment, configure secrets, validate all required endpoints, and configure FRONTEND_ORIGINS to include only trusted browser frontends.
+
+Request-bound database and media operations honor cancellation. Checkout shares cent-rounded shipping costs with voucher totals; the source NestJS checkout DTO's lack of a 50-line/100-unit cap and its date-coercion forms are preserved. Pricing unit tests live under tests/unit (not internal/).
 
 ## Migration provenance and parity
 

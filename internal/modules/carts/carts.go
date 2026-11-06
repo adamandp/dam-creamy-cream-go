@@ -1,7 +1,6 @@
 package carts
 
 import (
-	"context"
 	"time"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
@@ -68,7 +67,7 @@ func (s *Service) add(c fiber.Ctx) error {
 	if err := validateInput(body); err != nil {
 		return err
 	}
-	err = s.db.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(c.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := s.validateRelated(tx, claims.Subject, body.ProductID); err != nil {
 			return err
 		}
@@ -96,7 +95,7 @@ func (s *Service) remove(c fiber.Ctx) error {
 	if err := validateInput(body); err != nil {
 		return err
 	}
-	err = s.db.WithContext(context.Background()).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(c.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := s.validateRelated(tx, claims.Subject, body.ProductID); err != nil {
 			return err
 		}

@@ -13,6 +13,7 @@ func (s *Service) prepareVouchers(tx *gorm.DB, body CheckoutInput, now time.Time
 	subtotal := amount(data.totalPrice - data.lineDiscount)
 	checkoutCost := subtotal
 	shippingCost := data.shippingCost
+	originalShippingCost := shippingCost
 	seenGroups := map[string]bool{}
 	ids := append([]string{}, body.Order.VoucherIDs...)
 	sort.Strings(ids)
@@ -74,7 +75,10 @@ func (s *Service) prepareVouchers(tx *gorm.DB, body CheckoutInput, now time.Time
 		data.vouchers = append(data.vouchers, claimVoucher{voucher: v, claim: claim})
 	}
 	data.shippingCost = shippingCost
-	data.voucherAmount = amount(subtotal - checkoutCost + body.Shipment.Cost - shippingCost)
+	// The total must use the same rounded shipping amount that is charged.
+	// Mixing the raw request with the cent-rounded value could produce a
+	// negative voucher amount even when the buyer applied no voucher.
+	data.voucherAmount = amount((subtotal - checkoutCost) + (originalShippingCost - shippingCost))
 	data.finalPrice = amount(checkoutCost + shippingCost)
 	if !saneMoney(data.voucherAmount) || !saneMoney(data.finalPrice) {
 		return unavailable("Invalid voucher-adjusted order total")

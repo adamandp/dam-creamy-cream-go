@@ -2,8 +2,10 @@ package config
 
 import (
 	"errors"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -19,9 +21,19 @@ type Config struct {
 	MinIOBucket      string
 	MinIOUseSSL      bool
 	PublicAPIURL     string
+
+	CORSAllowedOrigins []string
 }
 
 func Load() (Config, error) {
+	origins := os.Getenv("FRONTEND_ORIGINS")
+	if origins == "" && env("NODE_ENV", "development") != "production" {
+		origins = "http://localhost:3000,http://localhost:3001,http://localhost:5173"
+	}
+	allowedOrigins, err := parseOrigins(origins)
+	if err != nil {
+		return Config{}, err
+	}
 	port := env("PORT", "3000")
 	ssl, err := strconv.ParseBool(env("MINIO_USE_SSL", "false"))
 	if err != nil {
@@ -40,6 +52,8 @@ func Load() (Config, error) {
 		MinIOBucket:      env("MINIO_BUCKET", "creamy-cream"),
 		MinIOUseSSL:      ssl,
 		PublicAPIURL:     env("PUBLIC_API_URL", "http://localhost:"+port),
+
+		CORSAllowedOrigins: allowedOrigins,
 	}
 	if cfg.DatabaseURL == "" || cfg.RedisURL == "" || cfg.AccessJWTSecret == "" || cfg.RefreshJWTSecret == "" {
 		return Config{}, errors.New("DATABASE_URL, REDIS_URL, ACCESS_JWT_SECRET and REFRESH_JWT_SECRET are required")
@@ -48,6 +62,9 @@ func Load() (Config, error) {
 		return Config{}, errors.New("MINIO_ENDPOINT, MINIO_ACCESS_KEY and MINIO_SECRET_KEY are required")
 	}
 	if cfg.Environment == "production" {
+		if len(cfg.CORSAllowedOrigins) == 0 {
+			return Config{}, errors.New("FRONTEND_ORIGINS must explicitly list trusted origins in production")
+		}
 		if os.Getenv("PUBLIC_API_URL") == "" {
 			return Config{}, errors.New("PUBLIC_API_URL must be explicitly configured in production")
 		}
@@ -63,4 +80,38 @@ func env(k, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func parseOrigins(raw string) ([]string, error) {
+	origins := []string{}
+	seen := map[string]bool{}
+	for _, entry := range strings.Split(raw, ",") {
+		origin := strings.TrimSpace(entry)
+		if origin == "" {
+			continue
+		}
+		parsed, err := url.Parse(origin)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			parsed.Host == "" || parsed.User != nil || parsed.Path != "" ||
+			parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
+			return nil, errors.New("FRONTEND_ORIGINS must contain comma-separated http(s) origins without paths or wildcards")
+		}
+		key := strings.ToLower(origin)
+		if !seen[key] {
+			origins = append(origins, origin)
+			seen[key] = true
+		}
+	}
+	return origins, nil
+}
+
+// OriginAllowed compares the full scheme, host and port, never wildcard-matching
+// credentialed browser requests.
+func (c Config) OriginAllowed(origin string) bool {
+	for _, allowed := range c.CORSAllowedOrigins {
+		if strings.EqualFold(origin, allowed) {
+			return true
+		}
+	}
+	return false
 }

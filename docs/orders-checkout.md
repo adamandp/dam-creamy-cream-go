@@ -44,12 +44,12 @@ Checkout request (nested shape matches the existing NestJS CQRS DTO):
 }
 ```
 
-Checkout response: HTTP 201 with `data.orderId`, `totalPrice`, `discountAmount`, `voucherAmount`, `shippingCost`, `finalPrice`, and `status=PENDING`. Prices, product details, discount amounts, payment total and voucher ownership are obtained and validated on the server. Shipping cost is presently the request value subject to numeric validation, **not** a carrier-verified price.
+Checkout response: HTTP 201 with `data.orderId`, `totalPrice`, `discountAmount`, `voucherAmount`, `shippingCost`, `finalPrice`, and `status=PENDING`. Prices, product details, discount amounts, payment total and voucher ownership are obtained and validated on the server. Shipping cost is presently the cent-rounded request value subject to numeric validation, **not** a carrier-verified price.
 
 ## Transaction and invariants
 
 1. Authenticate against current active user and role. Require `order.userId` to be the actual actor, and ensure `order.addressId` belongs to that user. A valid session is insufficient to use another account's address.
-2. Reject duplicate product/voucher IDs, invalid UUIDs, quantity outside 1..100, non-finite/negative shipping fees, unknown JSON fields, and more than two vouchers.
+2. Reject duplicate product/voucher IDs, invalid UUIDs, non-positive or non-integer quantity, non-finite/negative shipping fees, unknown JSON fields, and more than two vouchers.
 3. Lock the customer's Cart and CartItems using PostgreSQL `FOR UPDATE`; verify that every checkout line exists and has sufficient quantity. Read product price from the database and require active product.
 4. Verify active ProductDiscount relationship for each explicitly requested discount, lock Discount rows, validate date windows, per-order limit and remaining redemption quota. Public Cart/Catalog/Detail prices use the same global quota predicate (maxRedeemed > 0 and redeemedCount < maxRedeemed), so an already-exhausted promo is not advertised; a final remaining redemption can be consumed concurrently, hence Checkout remains authoritative. Cart, Catalog, Product Detail and Checkout share one calculator for PERCENTAGE, FIXED and PRICE. PRICE is a final-price override (never an amount subtracted), including a valid zero-price override. FREE_ITEM leaves the paid product price untouched and creates a separate bonus line. The calculator rounds to currency cents so storefront quotes and persisted order-item prices match. The `PRICE` discount means price override bounded by original product price.
 5. Lock Vouchers and UserVoucher claims, require current validity, ownership, `CLAIMED` status, capacity, minimum purchase, and at most one voucher for each `CHECKOUT` / `SHIPPING` group. Apply fixed/percentage rewards with zero floor.
@@ -86,3 +86,11 @@ Checkout response: HTTP 201 with `data.orderId`, `totalPrice`, `discountAmount`,
 - Fixed an HTTP/PostgreSQL-reproduced mismatch: Cart, Catalog and Product Detail previously advertised an active, in-date discount even when its global redeemedCount had already reached maxRedeemed; Checkout correctly returned 409. Shared SQL active-discount predicate now additionally requires maxRedeemed > 0 and redeemedCount < maxRedeemed.
 - Checkout row lock and quantity-aware quota validation remain unchanged. Showing an available per-unit discount does not guarantee enough redemptions for an arbitrary cart quantity or availability after concurrent checkouts.
 - Real PostgreSQL tests cover one remaining redemption, exhausted quota, over-redeemed count, zero quota, reopening quota, Checkout rejection without a partial Order, and a successful Checkout consuming the last redemption and immediately hiding the promo again (including a freshly added CartItem). No schema migration.
+
+## PR #3 follow-up: source contract and rounding fixes (2026-11-07)
+
+- Removed arbitrary limits of 50 order lines and 100 units per line. NestJS checkout's Zod DTO does not impose these caps; requests are still constrained by body size, duplicate product checks, positive integer quantities, Cart availability, inventory and quotas.
+- The shipment estimated date accepts the original Zod date coercion forms (ISO string, date-only string and epoch-millisecond JSON values), reusing the existing promotion date parser.
+- Fixes fractional shipping rounding: checkout discount calculations now compare the original **cent-rounded** shipping amount to the final shipping amount, avoiding negative voucher savings for a no-voucher order.
+- Regression tests cover no-voucher fractional shipping, quantities above 100 reaching Cart/stock validation, and JSON date coercion. CORS now requires explicit trusted frontend origins for credentialed cross-origin browser calls; production startup refuses an empty origin allowlist.
+- Pricing unit tests were moved out of `internal/` into `tests/unit/`, per the agreed test layout. No database migration, parent PR edit or change to the deliberate dummy login.

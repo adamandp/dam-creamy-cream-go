@@ -126,3 +126,12 @@ Corrected a previously untested mismatch between PR #2 Cart/Catalog/Detail and P
 ### PR #3 follow-up — exhausted discount storefront eligibility (2026-11-05)
 
 Public Cart/Catalog/Detail price queries now exclude discounts whose global redeemedCount >= maxRedeemed or maxRedeemed <= 0, matching the Checkout eligibility guard. Previously, storefronts advertised an exhausted promo which Checkout correctly rejected. The underlying Checkout row-lock, per-order cap and requested-quantity quota check remain authoritative; this is a deliberate inherited pricing correctness fix rather than a guaranteed quote reservation. Tests: TestCartCatalogDetailDiscountEligibility (available/exhausted/over/zero/reopened quota) and TestQuotaExhaustionAcrossStorefrontAndCheckout (all three reads, 409 without Order persistence, successful final-redemption checkout and subsequent suppression). No source NestJS, schema or dummy-login change.
+
+### PR #3 source parity and hardening follow-up (2026-11-07)
+
+- Checkout quantity and order-line validation now preserves the absence of arbitrary upper limits in the NestJS Zod DTO while retaining mandatory positive integer quantities and inventory/Cart/discount protection.
+- Shipment estimated-date decoding accepts the source's Zod coercion variants, reusing the existing promotion date parser.
+- Fixed a no-voucher fractional-shipping calculation where a raw shipping cost was incorrectly subtracted from a cent-rounded one, producing a negative voucher amount.
+- Credentialed CORS no longer reflects arbitrary Origin headers; production requires a configured `FRONTEND_ORIGINS` allowlist. This deliberately hardens the inherited NestJS `origin: true` behavior.
+- Request-bound operations use request contexts; detached compensating cleanup stays independent. Pricing unit tests are now under `tests/unit`.
+- These are scoped corrections in PR #3 only; the previous 34 matches / 13 documented deviations are not a substitute for complete NestJS regression testing.

@@ -270,4 +270,22 @@ func TestCheckoutAtomicPricingVoucherInventoryAndOwner(t *testing.T) {
 	if err := tx.Model(&domain.OrderVoucher{}).Where("order_id = ?", orderID).Count(&linked).Error; err != nil || linked != 2 {
 		t.Fatalf("expected both OrderVoucher links, got %d err=%v", linked, err)
 	}
+	// The original NestJS DTO does not impose an arbitrary per-line cap of
+	// 100; stock/cart checks, rather than a fabricated DTO limit, reject 101.
+	large := input
+	large.Order.VoucherIDs = nil
+	large.OrderItems = []orders.CheckoutItem{{ProductID: product.ID.ID, Quantity: 101}}
+	checkout(large, tokens.AccessToken, 409)
+
+	// A fractional client shipping quote must not create an invented negative
+	// voucher amount when no voucher was applied. Persist the rounded cost.
+	rounded := input
+	rounded.Order.VoucherIDs = nil
+	rounded.OrderItems = []orders.CheckoutItem{{ProductID: product.ID.ID, Quantity: 1}}
+	rounded.Shipment.Cost = 0.005
+	roundResponse := checkout(rounded, tokens.AccessToken, 201)
+	roundResult := roundResponse["data"].(map[string]any)
+	if roundResult["shippingCost"] != float64(0.01) || roundResult["voucherAmount"] != float64(0) || roundResult["finalPrice"] != float64(12000.01) {
+		t.Fatalf("fractional shipping with no voucher yielded inconsistent totals: %+v", roundResult)
+	}
 }

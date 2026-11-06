@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/config"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
@@ -48,22 +47,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 		return nil, fmt.Errorf("redis: %w", err)
 	}
 	httpApp := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
-	httpApp.Use(func(c fiber.Ctx) error {
-		origin := c.Get("Origin")
-		if origin != "" {
-			// CORS currently reflects request origins with credentials.
-			// Lock this down before deploying beyond the existing trust boundary.
-			c.Set("Access-Control-Allow-Origin", origin)
-			c.Set("Access-Control-Allow-Credentials", "true")
-			c.Set("Vary", "Origin")
-			c.Set("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization")
-			c.Set("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS")
-		}
-		if strings.EqualFold(c.Method(), "OPTIONS") {
-			return c.SendStatus(204)
-		}
-		return c.Next()
-	})
+	ConfigureCORS(httpApp, cfg)
 	store, err := infrastructure.NewMinIO(ctx, cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey, cfg.MinIOBucket, cfg.PublicAPIURL, cfg.MinIOUseSSL)
 	if err != nil {
 		_ = redisClient.Close()

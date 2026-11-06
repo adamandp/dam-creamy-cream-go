@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"context"
 	"time"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
@@ -35,7 +34,7 @@ func (s *Service) dummyLogin(c fiber.Ctx) error {
 	if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte("@Password123")); err != nil {
 		return fiber.NewError(401, "🚫 Login failed. Please check your identifier and password, then try again! 🔍")
 	}
-	tokens, err := s.sessions.NewTokens(context.Background(), u.ID.ID, u.RoleID, c.Cookies("refreshToken"), c.Get("User-Agent"), c.IP())
+	tokens, err := s.sessions.NewTokens(c.Context(), u.ID.ID, u.RoleID, c.Cookies("refreshToken"), c.Get("User-Agent"), c.IP())
 	if err != nil {
 		return err
 	}
@@ -48,14 +47,14 @@ func (s *Service) clearCookie(c fiber.Ctx) {
 func (s *Service) logout(c fiber.Ctx) error {
 	// Clear the browser cookie even when token revocation fails.
 	s.clearCookie(c)
-	if err := s.sessions.Logout(context.Background(), c.Cookies("refreshToken")); err != nil {
+	if err := s.sessions.Logout(c.Context(), c.Cookies("refreshToken")); err != nil {
 		return err
 	}
 	return c.Status(201).JSON(httpx.Response{Message: "🎉 You have logged out successfully! see u lateer"})
 }
 func (s *Service) logoutAll(c fiber.Ctx) error {
 	s.clearCookie(c)
-	if err := s.sessions.LogoutAll(context.Background(), c.Cookies("refreshToken")); err != nil {
+	if err := s.sessions.LogoutAll(c.Context(), c.Cookies("refreshToken")); err != nil {
 		return err
 	}
 	return c.Status(201).JSON(httpx.Response{Message: "🎉 You have logged out all sessions successfully! see u lateer"})
