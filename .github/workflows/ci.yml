@@ -39,6 +39,14 @@ jobs:
           PG_INTEGRATION=1 TEST_DATABASE_URL='postgresql://postgres:fixture-only@127.0.0.1:55433/creamy_test?sslmode=disable' \
             go test ./tests/integration -count=1 -v
 
+      - name: Pricing and checkout PostgreSQL race regression
+        run: |
+          set -euo pipefail
+          # All four discount types are compared through Cart, Catalog, Detail
+          # and Checkout; concurrent checkout stock/voucher tests run with -race.
+          PG_INTEGRATION=1 TEST_DATABASE_URL='postgresql://postgres:fixture-only@127.0.0.1:55433/creamy_test?sslmode=disable' \
+            go test -race ./tests/integration -run '^(TestAllDiscountTypesMatchCheckout|TestQuotaExhaustionAcrossStorefrontAndCheckout|TestCheckout)' -count=2 -v
+
       - name: Redis category-cache integration test
         run: |
           set -euo pipefail

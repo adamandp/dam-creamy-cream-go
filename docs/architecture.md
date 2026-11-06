@@ -48,3 +48,7 @@ Every Address mutating route acquires a PostgreSQL row lock on its owning User (
 Inventory PATCH validates both stock quantities together under a PostgreSQL \`FOR UPDATE\` lock on the target inventory row. Negative or over-reserved inventory cannot be written via the API. When implementing Checkout/Orders in PR #3, keep these invariants inside the reservation transaction and lock the same row.
 
 \`LogoutAll\` verifies the supplied refresh JWT against its current UserToken row and user state, then locks the authorizing token record and deletes the user's sessions atomically. Replay of a previously deleted token is unauthorized and cannot act on other sessions.
+
+## PR #3 Orders / Checkout transaction
+
+The internal/modules/orders package exposes POST /orders/checkout, GET /orders (admin), GET /orders/user and GET /orders/:id (owner/admin), with the shared actor guard. Checkout validates input before a GORM transaction, then locks Cart/CartItems, active Discounts, current Voucher claims, and Inventory in a deterministic order. Paid and FREE_ITEM reward quantities reserve inventory; Order, OrderItems, OrderVouchers, Payment PENDING and Shipment PENDING are persisted with Cart adjustments and counters in the same transaction. Any error rolls the whole checkout back. Production still requires trusted shipping quotes, payment capture/settlement, compensating cancellation and durable idempotency; see [orders-checkout.md](orders-checkout.md).

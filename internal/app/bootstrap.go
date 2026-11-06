@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/config"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
@@ -17,6 +16,7 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/health"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/inventory"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/media"
+	"github.com/adamandp/dam-creamy-cream-go/internal/modules/orders"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/productdiscounts"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/products"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/roles"
@@ -47,22 +47,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 		return nil, fmt.Errorf("redis: %w", err)
 	}
 	httpApp := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
-	httpApp.Use(func(c fiber.Ctx) error {
-		origin := c.Get("Origin")
-		if origin != "" {
-			// CORS currently reflects request origins with credentials.
-			// Lock this down before deploying beyond the existing trust boundary.
-			c.Set("Access-Control-Allow-Origin", origin)
-			c.Set("Access-Control-Allow-Credentials", "true")
-			c.Set("Vary", "Origin")
-			c.Set("Access-Control-Allow-Headers", "Content-Type, Accept, Authorization")
-			c.Set("Access-Control-Allow-Methods", "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS")
-		}
-		if strings.EqualFold(c.Method(), "OPTIONS") {
-			return c.SendStatus(204)
-		}
-		return c.Next()
-	})
+	ConfigureCORS(httpApp, cfg)
 	store, err := infrastructure.NewMinIO(ctx, cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey, cfg.MinIOBucket, cfg.PublicAPIURL, cfg.MinIOUseSSL)
 	if err != nil {
 		_ = redisClient.Close()
@@ -77,6 +62,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 	productdiscounts.NewService(db, ses).Routes(httpApp)
 	vouchers.NewService(db, ses).Routes(httpApp)
 	uservouchers.NewService(db, ses).Routes(httpApp)
+	orders.NewService(db, ses).Routes(httpApp)
 	media.NewService(store).Routes(httpApp)
 	carts.NewService(db, ses).Routes(httpApp)
 	categories.NewService(db, redisClient, ses).Routes(httpApp)
@@ -85,7 +71,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 	ses.Routes(httpApp)
 	auth.NewService(db, ses, cfg.Environment == "production").Routes(httpApp)
 	health.NewService(sqlDB).Routes(httpApp)
-	log.Info("dependencies wired", "modules", []string{"roles", "users", "categories", "products", "carts", "inventory", "addresses", "sessions", "auth", "health", "media", "discounts", "product-discounts", "vouchers", "user-vouchers"})
+	log.Info("dependencies wired", "modules", []string{"roles", "users", "categories", "products", "carts", "inventory", "addresses", "sessions", "auth", "health", "media", "discounts", "product-discounts", "vouchers", "user-vouchers", "orders"})
 	return &Runtime{HTTP: httpApp, Close: func() error {
 		err := redisClient.Close()
 		if x := sqlDB.Close(); err == nil {

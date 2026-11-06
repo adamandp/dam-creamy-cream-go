@@ -23,7 +23,7 @@ func (s *Service) Routes(app fiber.Router) {
 }
 
 func (s *Service) read(c fiber.Ctx) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(c.Context(), 15*time.Second)
 	defer cancel()
 	img, err := s.store.Get(ctx, c.Params("scope"), c.Params("id"), c.Params("filename"))
 	if err != nil {

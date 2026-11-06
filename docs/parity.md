@@ -21,7 +21,7 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 | Product Discounts | productdiscounts | PORT + TESTS | Assign/lookup/list, unique product rule and soft-disable verified. |
 | Vouchers | vouchers | PORT + TESTS | CRUD, validation, nullable fields and soft-disable verified; checkout redemption remains coupled to pending Orders. |
 | User Vouchers | uservouchers | PORT + TESTS | Claim/read/mark USED and nested voucher verified; /user routing defect intentionally corrected. |
-| Orders | orders | PENDING | CQRS checkout handler + 17 injected steps, plus query handlers. No exposed Nest controller route on master. |
+| Orders | orders | PR #3 PORT + TESTS | Explicit Go HTTP checkout/list/detail surface, atomic Order/OrderItem/Payment/Shipment writes, stock locks, cart decrement, discount and voucher validation; original Nest has CQRS steps but no HTTP Orders route. |
 | Payments | payments | PENDING | Verify existing service behavior. |
 | Shipments | shipments | PENDING | Shipping cost external integration must be traced/ported. |
 | Reviews | reviews | PENDING | User/product reviews. |
@@ -113,3 +113,25 @@ The side-by-side harness runs the original NestJS and Go services with separatel
 - **Sessions:** \`POST /auth/logout-all\` now requires a live, matching and unexpired UserToken plus valid signed refresh JWT and current active user/role; the authorizing UserToken row is locked before all sessions are deleted. A signed but already revoked token gets 401 and cannot delete other active sessions. Dummy login is deliberately untouched.
 - **Regressions:** \`TestAddressPrimaryInvariantAndReplacement\` covers primary switch, delete promotion, last-address guard, parallel switches and legacy-state repair; \`TestInventoryValidationsAndConcurrentEdits\` covers negatives, capacity conflicts, and concurrent partial updates; \`TestRevokedRefreshCannotLogoutAll\` verifies denied replay and valid logout-all via real HTTP. PostgreSQL/Redis/MinIO integration, repeated race tests and NestJS-vs-Go promotions replay remain required. Corrections above deliberately differ from insecure/inconsistent source behavior.
 - **Branch isolation:** all code lives in PR #2 only. PR #1, main, NestJS source, dummy login and database schema are unchanged.
+
+### PR #3 — Orders and Checkout
+
+Ported the existing NestJS Orders CQRS semantics to Go without inventing a NestJS route. Created owner-authenticated POST /orders/checkout and scoped reads. Server-owned prices, address ownership, Cart quantity, active product-discount association, per-discount and voucher quotas, CLAIMED voucher status, free-gift stock, and shipping/checkout voucher arithmetic are verified inside one DB transaction. Payment and Shipment are created PENDING, not sent to external gateways. Real PostgreSQL tests cover rollback at the final Shipment insert, concurrent stock and voucher contention, free reward stock and ownership. See [Orders/Checkout contract](orders-checkout.md). The previous 34-matches/13-approved/0-unexpected Promotions replay remains required and unchanged.
+
+### PR #3 follow-up — shared PRICE and FREE_ITEM semantics (2026-11-05)
+
+Corrected a previously untested mismatch between PR #2 Cart/Catalog/Detail and PR #3 Checkout. Discount type PRICE is a server-side *final price override*, not a fixed amount to deduct. FREE_ITEM never changes the paid line price and is materialized as a free reward with inventory reservation at Checkout. All three price-changing types use the shared calculator and consistent cent rounding. Real PostgreSQL integration regression TestAllDiscountTypesMatchCheckout compares Cart, Catalog, Detail, saved Checkout amount and reward inventory across nine scenarios; unit test TestDiscountPriceSemantics covers the same boundary logic. No database migration, dummy-login change, or change to parent PR branches.
+
+
+### PR #3 follow-up — exhausted discount storefront eligibility (2026-11-05)
+
+Public Cart/Catalog/Detail price queries now exclude discounts whose global redeemedCount >= maxRedeemed or maxRedeemed <= 0, matching the Checkout eligibility guard. Previously, storefronts advertised an exhausted promo which Checkout correctly rejected. The underlying Checkout row-lock, per-order cap and requested-quantity quota check remain authoritative; this is a deliberate inherited pricing correctness fix rather than a guaranteed quote reservation. Tests: TestCartCatalogDetailDiscountEligibility (available/exhausted/over/zero/reopened quota) and TestQuotaExhaustionAcrossStorefrontAndCheckout (all three reads, 409 without Order persistence, successful final-redemption checkout and subsequent suppression). No source NestJS, schema or dummy-login change.
+
+### PR #3 source parity and hardening follow-up (2026-11-07)
+
+- Checkout quantity and order-line validation now preserves the absence of arbitrary upper limits in the NestJS Zod DTO while retaining mandatory positive integer quantities and inventory/Cart/discount protection.
+- Shipment estimated-date decoding accepts the source's Zod coercion variants, reusing the existing promotion date parser.
+- Fixed a no-voucher fractional-shipping calculation where a raw shipping cost was incorrectly subtracted from a cent-rounded one, producing a negative voucher amount.
+- Credentialed CORS no longer reflects arbitrary Origin headers; production requires a configured `FRONTEND_ORIGINS` allowlist. This deliberately hardens the inherited NestJS `origin: true` behavior.
+- Request-bound operations use request contexts; detached compensating cleanup stays independent. Pricing unit tests are now under `tests/unit`.
+- These are scoped corrections in PR #3 only; the previous 34 matches / 13 documented deviations are not a substitute for complete NestJS regression testing.

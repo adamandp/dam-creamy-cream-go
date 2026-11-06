@@ -22,7 +22,7 @@ func (s *Service) Routes(app fiber.Router) {
 	app.Get("/health/db", s.postgres)
 }
 func (s *Service) web(c fiber.Ctx) error {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://google.com", nil)
+	req, err := http.NewRequestWithContext(c.Context(), http.MethodGet, "https://google.com", nil)
 	if err != nil {
 		return err
 	}
@@ -37,7 +37,7 @@ func (s *Service) web(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok", "info": fiber.Map{"google": fiber.Map{"status": "up"}}, "error": fiber.Map{}, "details": fiber.Map{"google": fiber.Map{"status": "up"}}})
 }
 func (s *Service) postgres(c fiber.Ctx) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(c.Context(), 2*time.Second)
 	defer cancel()
 	if err := s.db.PingContext(ctx); err != nil {
 		return c.Status(503).JSON(fiber.Map{"status": "error",
