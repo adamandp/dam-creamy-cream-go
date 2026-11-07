@@ -1,49 +1,40 @@
 package shipments
 
 import (
-	"context"
-	"crypto/sha256"
-	"fmt"
-	"time"
-
-	"github.com/redis/go-redis/v9"
+ "context"
+ "crypto/sha256"
+ "fmt"
+ "time"
+ "github.com/redis/go-redis/v9"
 )
 
-// CostRateLimiter protects the upstream provider's quota across API replicas.
-type CostRateLimiter interface {
-	Allow(ctx context.Context, clientIP string) (bool, error)
+type CostRateLimiter interface { Allow(ctx context.Context, clientIP string) (bool,error) }
+type RedisCostRateLimiter struct { client *redis.Client; limit int64; globalLimit int64; window time.Duration }
+
+// The optional global limit caps total provider usage across all clients and replicas.
+// Existing callers remain compatible; default global capacity equals the per-IP limit.
+func NewRedisCostRateLimiter(client *redis.Client, limit int, window time.Duration, globalLimit ...int) *RedisCostRateLimiter {
+ global := limit
+ if len(globalLimit)>0 { global=globalLimit[0] }
+ return &RedisCostRateLimiter{client:client,limit:int64(limit),globalLimit:int64(global),window:window}
 }
 
-type RedisCostRateLimiter struct {
-	client *redis.Client
-	limit  int64
-	window time.Duration
-}
-
-func NewRedisCostRateLimiter(client *redis.Client, limit int, window time.Duration) *RedisCostRateLimiter {
-	return &RedisCostRateLimiter{client: client, limit: int64(limit), window: window}
-}
-
-// INCR and first-use expiration must be atomic. Otherwise concurrent calls
-// could create a permanently unexpired limit key or evade the first window.
-var costLimitScript = redis.NewScript(`
-local count = redis.call('INCR', KEYS[1])
-if count == 1 then
-    redis.call('PEXPIRE', KEYS[1], ARGV[1])
-end
-return count
+var costLimitScript=redis.NewScript(`
+local ipCount = redis.call('GET', KEYS[1])
+local globalCount = redis.call('GET', KEYS[2])
+if tonumber(ipCount or '0') >= tonumber(ARGV[2]) then return 0 end
+if tonumber(globalCount or '0') >= tonumber(ARGV[3]) then return 0 end
+local ipNew = redis.call('INCR', KEYS[1])
+if ipNew == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+local globalNew = redis.call('INCR', KEYS[2])
+if globalNew == 1 then redis.call('PEXPIRE', KEYS[2], ARGV[1]) end
+return 1
 `)
 
-func (l *RedisCostRateLimiter) Allow(ctx context.Context, clientIP string) (bool, error) {
-	if l == nil || l.client == nil || l.limit < 1 || l.window <= 0 {
-		return false, fmt.Errorf("shipping quote rate limiter is not configured")
-	}
-	// Hash the address so IPs are neither stored directly in Redis keys nor
-	// vulnerable to a caller injecting Redis key delimiters.
-	key := fmt.Sprintf("shipping:quote:rate:v1:%x", sha256.Sum256([]byte(clientIP)))
-	count, err := costLimitScript.Run(ctx, l.client, []string{key}, l.window.Milliseconds()).Int64()
-	if err != nil {
-		return false, err
-	}
-	return count <= l.limit, nil
+func (l *RedisCostRateLimiter) Allow(ctx context.Context, clientIP string) (bool,error) {
+ if l==nil || l.client==nil || l.limit<1 || l.globalLimit<1 || l.window<=0 {return false,fmt.Errorf("shipping quote rate limiter is not configured")}
+ key:=fmt.Sprintf("shipping:quote:rate:v2:ip:%x",sha256.Sum256([]byte(clientIP)))
+ result,err:=costLimitScript.Run(ctx,l.client,[]string{key,"shipping:quote:rate:v2:global"},l.window.Milliseconds(),l.limit,l.globalLimit).Int64()
+ if err!=nil{return false,err}
+ return result==1,nil
 }
