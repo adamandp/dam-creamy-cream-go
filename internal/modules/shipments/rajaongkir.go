@@ -55,7 +55,15 @@ func NewRajaOngkir(baseURL, apiKey string, client *http.Client) (*RajaOngkir, er
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
-	return &RajaOngkir{endpoint: parsed.String(), apiKey: apiKey, client: client}, nil
+	// The provider credential is sent in a custom "key" header. Go copies that
+	// header across redirects, including redirects to other hosts. Do not follow
+	// any redirects: a 3xx response is an upstream failure, not a new destination.
+	// Copy the client so callers' shared HTTP client configuration is untouched.
+	safeClient := *client
+	safeClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &RajaOngkir{endpoint: parsed.String(), apiKey: apiKey, client: &safeClient}, nil
 }
 
 func (r *RajaOngkir) Calculate(ctx context.Context, input CostInput) (ShippingQuote, error) {

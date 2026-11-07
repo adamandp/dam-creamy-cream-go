@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
@@ -77,6 +79,65 @@ func TestRajaOngkirFailurePaths(t *testing.T) {
 	}
 	if _, err := client.Calculate(context.Background(), shipments.CostInput{Origin: 1, Destination: 2, Weight: 3}); err == nil {
 		t.Fatal("upstream HTTP error must not become a valid quote")
+	}
+}
+
+func TestRajaOngkirRedirectDoesNotForwardCredentials(t *testing.T) {
+	for _, status := range []int{
+		http.StatusMovedPermanently,
+		http.StatusFound,
+		http.StatusSeeOther,
+		http.StatusTemporaryRedirect,
+		http.StatusPermanentRedirect,
+	} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var forwarded atomic.Int32
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				forwarded.Add(1)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer target.Close()
+
+			var originalCalls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				originalCalls.Add(1)
+				if got := r.Header.Get("key"); got != "secret-shipping-key" {
+					t.Errorf("initial request missing provider key: %q", got)
+				}
+				w.Header().Set("Location", target.URL+"/capture")
+				w.WriteHeader(status)
+			}))
+			defer upstream.Close()
+
+			providedClient := upstream.Client()
+			for _, tc := range []struct {
+				name   string
+				client *http.Client
+			}{
+				{name: "default client"},
+				{name: "injected client", client: providedClient},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					provider, err := shipments.NewRajaOngkir(upstream.URL, "secret-shipping-key", tc.client)
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, err = provider.Calculate(context.Background(), shipments.CostInput{Origin: 1, Destination: 2, Weight: 100})
+					if err == nil || !strings.Contains(err.Error(), "HTTP "+strconv.Itoa(status)) {
+						t.Fatalf("redirect must be an upstream error, got %v", err)
+					}
+				})
+			}
+			if forwarded.Load() != 0 {
+				t.Fatalf("redirect target received %d requests; custom API key may have leaked", forwarded.Load())
+			}
+			if originalCalls.Load() != 2 {
+				t.Fatalf("expected one upstream request per client configuration, got %d", originalCalls.Load())
+			}
+			if providedClient.CheckRedirect != nil {
+				t.Fatal("NewRajaOngkir mutated caller-owned HTTP client")
+			}
+		})
 	}
 }
 
