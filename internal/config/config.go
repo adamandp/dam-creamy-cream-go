@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+ "net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -25,6 +26,8 @@ type Config struct {
 	RajaOngkirAPIKey  string
 
 	RajaOngkirRateLimit int
+ RajaOngkirGlobalRateLimit int
+ TrustedProxyCIDRs []string
 
 	CORSAllowedOrigins []string
 }
@@ -42,7 +45,17 @@ func Load() (Config, error) {
 	if err != nil || limit < 1 || limit > 1000 {
 		return Config{}, errors.New("RAJAONGKIR_RATE_LIMIT_PER_MINUTE must be an integer between 1 and 1000")
 	}
-	port := env("PORT", "3000")
+	globalLimit, err := strconv.Atoi(env("RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE", "30"))
+ if err != nil || globalLimit < 1 || globalLimit > 100000 {return Config{}, errors.New("RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE must be between 1 and 100000")}
+ var trusted []string
+ for _,entry:=range strings.Split(os.Getenv("TRUSTED_PROXY_CIDRS"),","){
+  entry=strings.TrimSpace(entry);if entry==""{continue}
+  if _,err:=netip.ParsePrefix(entry);err!=nil {
+   if _,err=netip.ParseAddr(entry);err!=nil{return Config{},errors.New("TRUSTED_PROXY_CIDRS must contain IP addresses or CIDRs")}
+  }
+  trusted=append(trusted,entry)
+ }
+ port := env("PORT", "3000")
 	ssl, err := strconv.ParseBool(env("MINIO_USE_SSL", "false"))
 	if err != nil {
 		return Config{}, errors.New("MINIO_USE_SSL must be true or false")
@@ -64,6 +77,8 @@ func Load() (Config, error) {
 		RajaOngkirAPIKey:  os.Getenv("RAJAONGKIR_API_KEY"),
 
 		RajaOngkirRateLimit: limit,
+ RajaOngkirGlobalRateLimit: globalLimit,
+ TrustedProxyCIDRs: trusted,
 
 		CORSAllowedOrigins: allowedOrigins,
 	}
