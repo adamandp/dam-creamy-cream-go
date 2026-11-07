@@ -53,7 +53,13 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("redis: %w", err)
 	}
-	httpApp := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
+	fiberConfig := fiber.Config{ErrorHandler: httpx.ErrorHandler}
+ if len(cfg.TrustedProxyCIDRs)>0 {
+  fiberConfig.TrustProxy=true
+  fiberConfig.ProxyHeader=fiber.HeaderXForwardedFor
+  fiberConfig.TrustProxyConfig=fiber.TrustProxyConfig{Proxies:cfg.TrustedProxyCIDRs}
+ }
+ httpApp := fiber.New(fiberConfig)
 	ConfigureCORS(httpApp, cfg)
 	store, err := infrastructure.NewMinIO(ctx, cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey, cfg.MinIOBucket, cfg.PublicAPIURL, cfg.MinIOUseSSL)
 	if err != nil {
@@ -71,7 +77,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 	uservouchers.NewService(db, ses).Routes(httpApp)
 	orders.NewService(db, ses).Routes(httpApp)
 	payments.NewService().Routes(httpApp)
-	shipments.NewService(db, ses, quotes, shipments.NewRedisCostRateLimiter(redisClient, cfg.RajaOngkirRateLimit, time.Minute)).Routes(httpApp)
+	shipments.NewService(db, ses, quotes, shipments.NewRedisCostRateLimiter(redisClient, cfg.RajaOngkirRateLimit, time.Minute, cfg.RajaOngkirGlobalRateLimit)).Routes(httpApp)
 	media.NewService(store).Routes(httpApp)
 	carts.NewService(db, ses).Routes(httpApp)
 	categories.NewService(db, redisClient, ses).Routes(httpApp)
