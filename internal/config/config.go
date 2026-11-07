@@ -25,9 +25,11 @@ type Config struct {
 	RajaOngkirBaseURL string
 	RajaOngkirAPIKey  string
 
-	RajaOngkirRateLimit       int
+	RajaOngkirRateLimit int
+
 	RajaOngkirGlobalRateLimit int
-	TrustedProxyCIDRs        []string
+
+	TrustedProxyCIDRs []string
 
 	CORSAllowedOrigins []string
 }
@@ -74,9 +76,11 @@ func Load() (Config, error) {
 		RajaOngkirBaseURL: os.Getenv("RAJAONGKIR_BASE_URL"),
 		RajaOngkirAPIKey:  os.Getenv("RAJAONGKIR_API_KEY"),
 
-		RajaOngkirRateLimit:       limit,
+		RajaOngkirRateLimit: limit,
+
 		RajaOngkirGlobalRateLimit: globalLimit,
-		TrustedProxyCIDRs:        trustedProxyCIDRs,
+
+		TrustedProxyCIDRs: trustedProxyCIDRs,
 
 		CORSAllowedOrigins: allowedOrigins,
 	}
