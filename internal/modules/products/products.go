@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"mime/multipart"
 	"strconv"
 	"strings"
@@ -376,24 +377,41 @@ func (s *Service) catalog(c fiber.Ctx) error {
 	if sort != "" && sort != "asc" && sort != "desc" && sort != "default" {
 		return fiber.NewError(400, "sort must be asc, desc or default")
 	}
-	db := s.db.Model(&domain.Product{}).Where("is_active = ?", true)
-	if q != "" {
-		needle := "%" + q + "%"
-		db = db.Where("(name ILIKE ? OR description ILIKE ?)", needle, needle)
-	}
+	var categoryIDs []string
 	if cat != "" {
-		db = db.Where("category_id IN ?", strings.Split(cat, ","))
+		categoryIDs = strings.Split(cat, ",")
+		for _, id := range categoryIDs {
+			if err := httpx.UUID(id); err != nil {
+				return err
+			}
+		}
 	}
+	type priceBound struct {
+		cmp   string
+		value float64
+	}
+	var bounds []priceBound
 	for _, cond := range []struct{ key, cmp string }{{"min", ">="}, {"max", "<="}} {
 		raw := c.Query(cond.key)
 		if raw == "" {
 			continue
 		}
 		n, err := strconv.ParseFloat(raw, 64)
-		if err != nil || n < 0 || n > 1000000 {
+		if err != nil || math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || n > 1000000 {
 			return fiber.NewError(400, fmt.Sprintf("%s must be within 0..1000000", cond.key))
 		}
-		db = db.Where("price "+cond.cmp+" ?", n)
+		bounds = append(bounds, priceBound{cmp: cond.cmp, value: n})
+	}
+	db := s.db.Model(&domain.Product{}).Where("is_active = ?", true)
+	if q != "" {
+		needle := "%" + q + "%"
+		db = db.Where("(name ILIKE ? OR description ILIKE ?)", needle, needle)
+	}
+	if len(categoryIDs) > 0 {
+		db = db.Where("category_id IN ?", categoryIDs)
+	}
+	for _, bound := range bounds {
+		db = db.Where("price "+bound.cmp+" ?", bound.value)
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {

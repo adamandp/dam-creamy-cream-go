@@ -22,8 +22,8 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 | Vouchers | vouchers | PORT + TESTS | CRUD, validation, nullable fields and soft-disable verified; checkout redemption remains coupled to pending Orders. |
 | User Vouchers | uservouchers | PORT + TESTS | Claim/read/mark USED and nested voucher verified; /user routing defect intentionally corrected. |
 | Orders | orders | PR #3 PORT + TESTS | Explicit Go HTTP checkout/list/detail surface, atomic Order/OrderItem/Payment/Shipment writes, stock locks, cart decrement, discount and voucher validation; original Nest has CQRS steps but no HTTP Orders route. |
-| Payments | payments | PENDING | Verify existing service behavior. |
-| Shipments | shipments | PENDING | Shipping cost external integration must be traced/ported. |
+| Payments | payments | PR #4 SCAFFOLD PARITY + TESTS | NestJS PaymentService only returns literal strings; matching endpoints never charge or mutate payment records. |
+| Shipments | shipments | PR #4 PORT + TESTS | List/detail, status PATCH, public cost proxy via RajaOngkir with Redis per-IP and global provider quotas, explicit trusted proxies, positive integer provider inputs, and Prisma millisecond UTC timestamps; owner/admin ACL deliberately fixes unauthenticated legacy reads/writes. External carrier API needs real-credential verification. |
 | Reviews | reviews | PENDING | User/product reviews. |
 | Recommendations | recommendations | PENDING | Classic, category, offers, related. |
 | Product Analytics | productanalytics | PENDING | Product views/counts. |
@@ -135,3 +135,12 @@ Public Cart/Catalog/Detail price queries now exclude discounts whose global rede
 - Credentialed CORS no longer reflects arbitrary Origin headers; production requires a configured `FRONTEND_ORIGINS` allowlist. This deliberately hardens the inherited NestJS `origin: true` behavior.
 - Request-bound operations use request contexts; detached compensating cleanup stays independent. Pricing unit tests are now under `tests/unit`.
 - These are scoped corrections in PR #3 only; the previous 34 matches / 13 documented deviations are not a substitute for complete NestJS regression testing.
+
+
+### PR #4: Shipments and legacy Payments endpoints (2026-11-07)
+
+- Shipment list is admin-only, detail owner/admin, status mutation admin-only. This tightens NestJS's unauthenticated access. Mutating Shipment.status does not silently update Orders or Payments.
+- Public POST /shipments/cost uses numeric origin, destination, weight and the original 17 couriers to call RajaOngkir's URL-encoded domestic-cost API from the server; it returns message, status and data. Missing provider settings yield 503, upstream errors 502. Positive finite values are an intentional stricter input rule. Fake-provider tests exist; actual provider verification requires staging credentials.
+- PaymentsService in NestJS is an inert scaffold: five literal-text routes without data mutation. PR #4 reproduces it; it does NOT process capture, settlement or refunds.
+- No database migration, changes to PR #1/#2/#3, or changes to the dummy login. Checkout still accepts an unverified caller-supplied shipment.cost; production quote binding is a separate concern.
+- PR #4 follow-up fixes the three inherited PR #3 findings: aggregate prices reconcile from rounded unit prices, `FREE_ITEM` reward quantities follow the NestJS configuration rather than an arbitrary 100-unit cap (with inventory overflow checks), and both required shipment `cost` and nullable `description` keys are validated. Checkout quote-binding remains a separate unresolved contract/integrity issue because the schema lacks authoritative destination/weight data.

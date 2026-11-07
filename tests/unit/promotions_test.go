@@ -49,6 +49,12 @@ func TestPromotionValidators(t *testing.T) {
 	if err := promotionutil.Text("WELCOME_20", "Code", 1, 50); err != nil {
 		t.Fatal(err)
 	}
+	if err := promotionutil.Text(strings.Repeat("中", 255), "Description", 1, 255); err != nil {
+		t.Fatalf("255 UTF-16 code units must be accepted: %v", err)
+	}
+	if err := promotionutil.Text(strings.Repeat("🍦", 128), "Description", 1, 255); err == nil {
+		t.Fatal("256 UTF-16 code units must be rejected")
+	}
 	if err := promotionutil.Enum("FREE_ITEM", "Discount Type", "FREE_ITEM", "FIXED"); err != nil {
 		t.Fatal(err)
 	}

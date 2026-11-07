@@ -52,6 +52,11 @@ The application does not call AutoMigrate or alter database tables on startup. U
 | MINIO_USE_SSL | HTTPS to MinIO |
 | PUBLIC_API_URL | Public API origin for image URLs |
 | FRONTEND_ORIGINS | Comma-separated trusted frontend origins for credentialed CORS; required in production |
+| RAJAONGKIR_BASE_URL | Optional RajaOngkir API base URL; HTTPS required in production if configured |
+| RAJAONGKIR_API_KEY | Server-only shipping quote credential; configure with base URL |
+| RAJAONGKIR_RATE_LIMIT_PER_MINUTE | Redis-backed per-client-IP RajaOngkir quota; default 30, range 1–1000 |
+| RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE | Total RajaOngkir quota shared across IPs and replicas; default 30, range 1–100000 |
+| TRUSTED_PROXY_CIDRS | Optional exact trusted reverse-proxy IPs/CIDRs; no proxy header trusted by default |
 
 ## Modules
 
@@ -59,9 +64,10 @@ The application does not call AutoMigrate or alter database tables on startup. U
 - Categories, products, product detail/information, inventory, carts
 - Discounts, product discount assignments, vouchers, user voucher claims
 - Orders & Checkout (transactional stock/voucher/cart, pending payment and shipment records)
+- Shipments (owner/admin reads, admin status updates, rate-limited RajaOngkir quotes) and legacy Payments scaffold endpoints
 - Media delivery and health checks
 
-See [API reference](docs/api.md) for supported routes, input requirements and response behavior. For PR #3 checkout shape, transactional rules, concurrency tests and non-production boundaries, see [Orders / Checkout](docs/orders-checkout.md).
+See [API reference](docs/api.md) for supported routes, input requirements and response behavior. For PR #3 checkout shape, transactional rules, concurrency tests and non-production boundaries, see [Orders / Checkout](docs/orders-checkout.md). PR #4 shipping and payment boundaries are in [Shipments / Payments](docs/shipments-payments.md).
 
 ## Project structure
 
