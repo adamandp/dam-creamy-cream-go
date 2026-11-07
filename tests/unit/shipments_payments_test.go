@@ -182,3 +182,15 @@ func TestShippingCostEndpointValidationAndLegacyPaymentScaffold(t *testing.T) {
 		t.Fatalf("Nest placeholder mismatch: %q", v)
 	}
 }
+
+func TestPaymentJSNumberCoercion(t *testing.T) {
+ app:=fiber.New()
+ payments.NewService().Routes(app)
+ cases:=map[string]string{"0x10":"16","0b101":"5","0o17":"15","1e3":"1000","-0":"0","Infinity":"Infinity","abc":"NaN"}
+ for input,want:=range cases {
+  req:=httptest.NewRequest("GET","/payments/"+input,nil)
+  res,err:=app.Test(req);if err!=nil{t.Fatal(err)}
+  b,err:=io.ReadAll(res.Body);res.Body.Close();if err!=nil{t.Fatal(err)}
+  if !strings.Contains(string(b),"#"+want+" payment"){t.Errorf("%s: %s; want %s",input,b,want)}
+ }
+}
