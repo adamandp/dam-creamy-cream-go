@@ -55,6 +55,8 @@ The application does not call AutoMigrate or alter database tables on startup. U
 | RAJAONGKIR_BASE_URL | Optional RajaOngkir API base URL; HTTPS required in production if configured |
 | RAJAONGKIR_API_KEY | Server-only shipping quote credential; configure with base URL |
 | RAJAONGKIR_RATE_LIMIT_PER_MINUTE | Redis-backed per-client-IP RajaOngkir quota; default 30, range 1–1000 |
+| RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE | Total RajaOngkir quota shared across IPs and replicas; default 30, range 1–100000 |
+| TRUSTED_PROXY_CIDRS | Optional exact trusted reverse-proxy IPs/CIDRs; no proxy header trusted by default |
 
 ## Modules
 

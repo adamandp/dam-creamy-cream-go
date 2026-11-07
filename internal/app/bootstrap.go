@@ -53,13 +53,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("redis: %w", err)
 	}
-	fiberConfig := fiber.Config{ErrorHandler: httpx.ErrorHandler}
- if len(cfg.TrustedProxyCIDRs)>0 {
-  fiberConfig.TrustProxy=true
-  fiberConfig.ProxyHeader=fiber.HeaderXForwardedFor
-  fiberConfig.TrustProxyConfig=fiber.TrustProxyConfig{Proxies:cfg.TrustedProxyCIDRs}
- }
- httpApp := fiber.New(fiberConfig)
+	httpApp := fiber.New(httpConfig(cfg))
 	ConfigureCORS(httpApp, cfg)
 	store, err := infrastructure.NewMinIO(ctx, cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey, cfg.MinIOBucket, cfg.PublicAPIURL, cfg.MinIOUseSSL)
 	if err != nil {
@@ -94,4 +88,14 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 		}
 		return err
 	}}, nil
+}
+
+func httpConfig(cfg config.Config) fiber.Config {
+	options := fiber.Config{ErrorHandler: httpx.ErrorHandler}
+	if len(cfg.TrustedProxyCIDRs) > 0 {
+		options.TrustProxy = true
+		options.ProxyHeader = fiber.HeaderXForwardedFor
+		options.TrustProxyConfig = fiber.TrustProxyConfig{Proxies: cfg.TrustedProxyCIDRs}
+	}
+	return options
 }

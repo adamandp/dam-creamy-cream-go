@@ -184,13 +184,37 @@ func TestShippingCostEndpointValidationAndLegacyPaymentScaffold(t *testing.T) {
 }
 
 func TestPaymentJSNumberCoercion(t *testing.T) {
- app:=fiber.New()
- payments.NewService().Routes(app)
- cases:=map[string]string{"0x10":"16","0b101":"5","0o17":"15","1e3":"1000","-0":"0","Infinity":"Infinity","abc":"NaN"}
- for input,want:=range cases {
-  req:=httptest.NewRequest("GET","/payments/"+input,nil)
-  res,err:=app.Test(req);if err!=nil{t.Fatal(err)}
-  b,err:=io.ReadAll(res.Body);res.Body.Close();if err!=nil{t.Fatal(err)}
-  if !strings.Contains(string(b),"#"+want+" payment"){t.Errorf("%s: %s; want %s",input,b,want)}
- }
+	app := fiber.New()
+	payments.NewService().Routes(app)
+	cases := map[string]string{
+		"0x10":      "16",
+		"0Xf":       "15",
+		"0b101":     "5",
+		"0o17":      "15",
+		"1e3":       "1000",
+		"1e21":      "1e+21",
+		"1e-7":      "1e-7",
+		"1e-6":      "0.000001",
+		"1e309":     "Infinity",
+		"-0":        "0",
+		"Infinity":  "Infinity",
+		"-Infinity": "-Infinity",
+		"Inf":       "NaN",
+		"abc":       "NaN",
+	}
+	for input, want := range cases {
+		req := httptest.NewRequest("GET", "/payments/"+input, nil)
+		res, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(res.Body)
+		res.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), "#"+want+" payment") {
+			t.Errorf("%s: response %s, want %s", input, body, want)
+		}
+	}
 }

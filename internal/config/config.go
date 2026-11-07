@@ -2,7 +2,7 @@ package config
 
 import (
 	"errors"
- "net/netip"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -25,9 +25,9 @@ type Config struct {
 	RajaOngkirBaseURL string
 	RajaOngkirAPIKey  string
 
-	RajaOngkirRateLimit int
- RajaOngkirGlobalRateLimit int
- TrustedProxyCIDRs []string
+	RajaOngkirRateLimit       int
+	RajaOngkirGlobalRateLimit int
+	TrustedProxyCIDRs        []string
 
 	CORSAllowedOrigins []string
 }
@@ -46,16 +46,14 @@ func Load() (Config, error) {
 		return Config{}, errors.New("RAJAONGKIR_RATE_LIMIT_PER_MINUTE must be an integer between 1 and 1000")
 	}
 	globalLimit, err := strconv.Atoi(env("RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE", "30"))
- if err != nil || globalLimit < 1 || globalLimit > 100000 {return Config{}, errors.New("RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE must be between 1 and 100000")}
- var trusted []string
- for _,entry:=range strings.Split(os.Getenv("TRUSTED_PROXY_CIDRS"),","){
-  entry=strings.TrimSpace(entry);if entry==""{continue}
-  if _,err:=netip.ParsePrefix(entry);err!=nil {
-   if _,err=netip.ParseAddr(entry);err!=nil{return Config{},errors.New("TRUSTED_PROXY_CIDRS must contain IP addresses or CIDRs")}
-  }
-  trusted=append(trusted,entry)
- }
- port := env("PORT", "3000")
+	if err != nil || globalLimit < 1 || globalLimit > 100000 {
+		return Config{}, errors.New("RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE must be an integer between 1 and 100000")
+	}
+	trustedProxyCIDRs, err := parseTrustedProxyCIDRs(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		return Config{}, err
+	}
+	port := env("PORT", "3000")
 	ssl, err := strconv.ParseBool(env("MINIO_USE_SSL", "false"))
 	if err != nil {
 		return Config{}, errors.New("MINIO_USE_SSL must be true or false")
@@ -76,9 +74,9 @@ func Load() (Config, error) {
 		RajaOngkirBaseURL: os.Getenv("RAJAONGKIR_BASE_URL"),
 		RajaOngkirAPIKey:  os.Getenv("RAJAONGKIR_API_KEY"),
 
-		RajaOngkirRateLimit: limit,
- RajaOngkirGlobalRateLimit: globalLimit,
- TrustedProxyCIDRs: trusted,
+		RajaOngkirRateLimit:       limit,
+		RajaOngkirGlobalRateLimit: globalLimit,
+		TrustedProxyCIDRs:        trustedProxyCIDRs,
 
 		CORSAllowedOrigins: allowedOrigins,
 	}
@@ -147,4 +145,30 @@ func (c Config) OriginAllowed(origin string) bool {
 		}
 	}
 	return false
+}
+
+func parseTrustedProxyCIDRs(raw string) ([]string, error) {
+	trusted := []string{}
+	seen := make(map[string]struct{})
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if address, err := netip.ParseAddr(entry); err == nil {
+			entry = address.String()
+		} else if network, err := netip.ParsePrefix(entry); err == nil {
+			if network.Bits() == 0 {
+				return nil, errors.New("TRUSTED_PROXY_CIDRS cannot trust all IP addresses")
+			}
+			entry = network.Masked().String()
+		} else {
+			return nil, errors.New("TRUSTED_PROXY_CIDRS must list valid IP addresses or CIDRs")
+		}
+		if _, found := seen[entry]; !found {
+			seen[entry] = struct{}{}
+			trusted = append(trusted, entry)
+		}
+	}
+	return trusted, nil
 }

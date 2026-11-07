@@ -23,7 +23,7 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 | User Vouchers | uservouchers | PORT + TESTS | Claim/read/mark USED and nested voucher verified; /user routing defect intentionally corrected. |
 | Orders | orders | PR #3 PORT + TESTS | Explicit Go HTTP checkout/list/detail surface, atomic Order/OrderItem/Payment/Shipment writes, stock locks, cart decrement, discount and voucher validation; original Nest has CQRS steps but no HTTP Orders route. |
 | Payments | payments | PR #4 SCAFFOLD PARITY + TESTS | NestJS PaymentService only returns literal strings; matching endpoints never charge or mutate payment records. |
-| Shipments | shipments | PR #4 PORT + TESTS | List/detail, status PATCH, public cost proxy via RajaOngkir with Redis per-IP quota, positive integer provider inputs, and Prisma millisecond UTC timestamps; owner/admin ACL deliberately fixes unauthenticated legacy reads/writes. External carrier API needs real-credential verification. |
+| Shipments | shipments | PR #4 PORT + TESTS | List/detail, status PATCH, public cost proxy via RajaOngkir with Redis per-IP and global provider quotas, explicit trusted proxies, positive integer provider inputs, and Prisma millisecond UTC timestamps; owner/admin ACL deliberately fixes unauthenticated legacy reads/writes. External carrier API needs real-credential verification. |
 | Reviews | reviews | PENDING | User/product reviews. |
 | Recommendations | recommendations | PENDING | Classic, category, offers, related. |
 | Product Analytics | productanalytics | PENDING | Product views/counts. |

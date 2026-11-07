@@ -16,7 +16,7 @@ Source of truth: adamandp/dam-creamy-cream-be (NestJS ShipmentsController, Shipm
 | PATCH | /payments/:id | Public inert scaffold | HTTP 200, literal "This action updates a #N payment" |
 | DELETE | /payments/:id | Public inert scaffold | HTTP 200, literal "This action removes a #N payment" |
 
-NestJS PaymentsService contains only those placeholder strings. It has no actual persisted CRUD, gateway, capture, settlement or refunds. Exposing the same responses does not implement payment processing. Checkout PR #3 creates a separate PENDING Payment record.
+NestJS PaymentsService contains only those placeholder strings. Path parameters in its generated scaffold are coerced with JavaScript's unary plus; the Go port preserves numeric radix, infinity and exponential formatting on these inert text endpoints. It has no actual persisted CRUD, gateway, capture, settlement or refunds. Exposing the same responses does not implement payment processing. Checkout PR #3 creates a separate PENDING Payment record.
 
 ## RajaOngkir integration
 
@@ -28,11 +28,13 @@ jne:sicepat:ide:sap:jnt:ninja:tiki:lion:anteraja:pos:ncs:rex:rpx:sentral:star:wa
 
 The API credential is sent in the upstream key header, never to the browser. HTTP timeout is 10 seconds and response payload is capped at 1 MiB. Upstream HTTP/network/JSON failures return generic HTTP 502 without leaking the credential. JSON numbers and numeric strings are accepted only when they coerce to positive whole numbers within signed 32-bit range; fractional, nonpositive, NaN/Infinity and unknown-field inputs are rejected before contacting the provider. RajaOngkir requires integer region IDs and weights (in grams). This integer-input rule is deliberately stricter than NestJS numeric coercion.
 
-The public quote endpoint is protected by a Redis-backed, atomic, per-client-IP **fixed-window** quota (default 30 valid quote requests per 60 seconds across app replicas). Configure `RAJAONGKIR_RATE_LIMIT_PER_MINUTE` to an integer from 1 to 1000. Excess traffic returns HTTP 429 with `Retry-After: 60`; Redis errors fail closed with HTTP 503 so provider quota cannot be exhausted during an outage. Use a trusted reverse-proxy IP configuration in deployment so client IPs are resolved correctly; otherwise multiple users may share a single quota. The limiter applies only to valid, provider-configured quote requests; malformed requests are not sent to RajaOngkir.
+The public quote endpoint uses an atomic Redis **fixed-window** limiter with **two simultaneous budgets**: per client IP (default 30 requests/60s, `RAJAONGKIR_RATE_LIMIT_PER_MINUTE`, valid range 1–1000) and **global per provider API** (default 30 requests/60s across all IPs and replicas, `RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE`, valid range 1–100000). All valid, configured quote requests consume one token from both budgets. A rejected request consumes neither. Set the global rate below your RajaOngkir API-key quota; the default is intentionally conservative.
+
+Excess traffic returns HTTP 429 with `Retry-After: 60`; Redis errors fail closed with HTTP 503. The default Fiber configuration uses the direct TCP remote IP and **ignores untrusted forwarding headers**. For Nginx/load balancers, configure `TRUSTED_PROXY_CIDRS` with only the actual proxy IP addresses or CIDRs, e.g. `10.10.0.5/32`. This explicitly enables Fiber trusted-proxy handling of `X-Forwarded-For`; never configure arbitrary client networks or `0.0.0.0/0`. Without correct deployment-specific proxy settings, multiple users behind a gateway may share one IP quota. Malformed requests are rejected before reaching Redis or RajaOngkir.
 
 Shipment list and detail API timestamps use UTC ISO-8601 with **exactly three millisecond digits** (`.000Z` through `.999Z`), matching Prisma DateTime JSON, including nullable `deliveredAt`.
 
-Unit tests use a fake HTTP server to verify outbound request, form fields, header and response, and rate-limit deny/error paths. Redis integration tests verify per-IP isolation and atomic concurrency. Live RajaOngkir verification is NOT asserted without staging credentials.
+Unit tests use a fake HTTP server to verify outbound request, form fields, header and response, and rate-limit deny/error paths. Redis integration tests verify per-IP isolation, combined global budget, no quota consumption on rejected requests, and atomic concurrency. Live RajaOngkir verification is NOT asserted without staging credentials.
 
 ## Authorization and production boundaries
 

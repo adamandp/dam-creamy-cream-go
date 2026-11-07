@@ -28,6 +28,9 @@ func TestShippingQuoteRedisRateLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
+	if err := client.Del(ctx, "shipping:quote:rate:v2:global").Err(); err != nil {
+		t.Fatal(err)
+	}
 	limiter := shipments.NewRedisCostRateLimiter(client, 3, time.Minute, 100)
 	uniqueIP := fmt.Sprintf("198.51.100.77-%d", time.Now().UnixNano())
 	for n := 0; n < 4; n++ {
@@ -63,15 +66,57 @@ func TestShippingQuoteRedisRateLimit(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	if successful.Load() != 3 {
+		t.Fatalf("concurrent per-IP quota should allow exactly 3 requests; got %d", successful.Load())
+	}
+
+	// The CI Redis instance is disposable. Reset only the dedicated quote
+	// global key so this test can exercise two independent quota scenarios.
+	const globalKey = "shipping:quote:rate:v2:global"
+	if err := client.Del(ctx, globalKey).Err(); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Del(context.Background(), globalKey)
+
 	globalLimiter := shipments.NewRedisCostRateLimiter(client, 3, time.Minute, 2)
- globalIP1 := uniqueIP+"-global-a"
- globalIP2 := uniqueIP+"-global-b"
- // Existing shared global quota can be consumed by separate clients.
- // A fresh Redis namespace is required to test exact global counts in isolation.
- _ = globalLimiter
- _ = globalIP1
- _ = globalIP2
- if successful.Load() != 3 {
-		t.Fatalf("concurrent quota should allow exactly 3 requests; got %d", successful.Load())
+	for n, ip := range []string{uniqueIP + "-global-a", uniqueIP + "-global-b", uniqueIP + "-global-c"} {
+		allowed, err := globalLimiter.Allow(ctx, ip)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if allowed != (n < 2) {
+			t.Fatalf("global request %d allowed=%t, expected %t", n+1, allowed, n < 2)
+		}
+	}
+	// A request denied by the global budget must not consume its IP quota.
+	raisedLimiter := shipments.NewRedisCostRateLimiter(client, 3, time.Minute, 3)
+	allowed, err = raisedLimiter.Allow(ctx, uniqueIP+"-global-c")
+	if err != nil || !allowed {
+		t.Fatalf("globally rejected requests must not consume per-IP quota: allowed=%t err=%v", allowed, err)
+	}
+
+	if err := client.Del(ctx, globalKey).Err(); err != nil {
+		t.Fatal(err)
+	}
+	concurrentGlobal := shipments.NewRedisCostRateLimiter(client, 3, time.Minute, 4)
+	successful.Store(0)
+	for n := 0; n < 20; n++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			ip := fmt.Sprintf("%s-global-parallel-%d", uniqueIP, n)
+			ok, callErr := concurrentGlobal.Allow(ctx, ip)
+			if callErr != nil {
+				t.Errorf("Redis global rate limiter: %v", callErr)
+				return
+			}
+			if ok {
+				successful.Add(1)
+			}
+		}(n)
+	}
+	wg.Wait()
+	if successful.Load() != 4 {
+		t.Fatalf("concurrent global quota should allow exactly 4 requests; got %d", successful.Load())
 	}
 }
