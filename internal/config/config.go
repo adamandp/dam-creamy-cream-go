@@ -24,6 +24,8 @@ type Config struct {
 	RajaOngkirBaseURL string
 	RajaOngkirAPIKey  string
 
+	RajaOngkirRateLimit int
+
 	CORSAllowedOrigins []string
 }
 
@@ -35,6 +37,10 @@ func Load() (Config, error) {
 	allowedOrigins, err := parseOrigins(origins)
 	if err != nil {
 		return Config{}, err
+	}
+	limit, err := strconv.Atoi(env("RAJAONGKIR_RATE_LIMIT_PER_MINUTE", "30"))
+	if err != nil || limit < 1 || limit > 1000 {
+		return Config{}, errors.New("RAJAONGKIR_RATE_LIMIT_PER_MINUTE must be an integer between 1 and 1000")
 	}
 	port := env("PORT", "3000")
 	ssl, err := strconv.ParseBool(env("MINIO_USE_SSL", "false"))
@@ -56,6 +62,8 @@ func Load() (Config, error) {
 		PublicAPIURL:      env("PUBLIC_API_URL", "http://localhost:"+port),
 		RajaOngkirBaseURL: os.Getenv("RAJAONGKIR_BASE_URL"),
 		RajaOngkirAPIKey:  os.Getenv("RAJAONGKIR_API_KEY"),
+
+		RajaOngkirRateLimit: limit,
 
 		CORSAllowedOrigins: allowedOrigins,
 	}

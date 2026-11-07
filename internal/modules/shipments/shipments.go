@@ -22,10 +22,11 @@ type Service struct {
 	db       *gorm.DB
 	sessions *sessions.Service
 	quotes   QuoteClient
+	limiter  CostRateLimiter
 }
 
-func NewService(db *gorm.DB, ses *sessions.Service, quotes QuoteClient) *Service {
-	return &Service{db: db, sessions: ses, quotes: quotes}
+func NewService(db *gorm.DB, ses *sessions.Service, quotes QuoteClient, limiter CostRateLimiter) *Service {
+	return &Service{db: db, sessions: ses, quotes: quotes, limiter: limiter}
 }
 
 func (s *Service) Routes(app fiber.Router) {
@@ -54,7 +55,11 @@ func (s *Service) findAll(c fiber.Ctx) error {
 	if err := q.Order("created_at DESC, id DESC").Offset((page - 1) * limit).Limit(limit).Find(&data).Error; err != nil {
 		return err
 	}
-	return c.JSON(httpx.Response{Message: httpx.Message("get", "Shipment"), Data: data, Paging: httpx.Pagination(page, limit, total)})
+	views := make([]shipmentView, 0, len(data))
+	for _, shipment := range data {
+		views = append(views, toShipmentView(shipment))
+	}
+	return c.JSON(httpx.Response{Message: httpx.Message("get", "Shipment"), Data: views, Paging: httpx.Pagination(page, limit, total)})
 }
 
 func (s *Service) findByID(c fiber.Ctx) error {
@@ -80,7 +85,7 @@ func (s *Service) findByID(c fiber.Ctx) error {
 			return httpx.Forbidden()
 		}
 	}
-	return c.JSON(httpx.Response{Message: httpx.Message("get", "Shipment"), Data: shipment})
+	return c.JSON(httpx.Response{Message: httpx.Message("get", "Shipment"), Data: toShipmentView(shipment)})
 }
 
 func (s *Service) updateStatus(c fiber.Ctx) error {
@@ -151,8 +156,8 @@ func parseCoercedNumber(raw json.RawMessage) (float64, error) {
 	default:
 		return 0, fiber.NewError(400, "Invalid shipping number")
 	}
-	if math.IsNaN(number) || math.IsInf(number, 0) || number <= 0 {
-		return 0, fiber.NewError(400, "Shipping numbers must be positive and finite")
+	if math.IsNaN(number) || math.IsInf(number, 0) || number <= 0 || math.Trunc(number) != number || number > 2147483647 {
+		return 0, fiber.NewError(400, "Shipping numbers must be positive 32-bit integers")
 	}
 	return number, nil
 }
@@ -180,6 +185,18 @@ func (s *Service) cost(c fiber.Ctx) error {
 	}
 	if s.quotes == nil {
 		return fiber.NewError(503, "Shipping quote provider is not configured")
+	}
+	if s.limiter == nil {
+		return fiber.NewError(503, "Shipping quote rate limiter is not configured")
+	}
+	allowed, err := s.limiter.Allow(c.Context(), c.IP())
+	if err != nil {
+		// Fail closed on Redis outages; never forward unlimited calls.
+		return fiber.NewError(503, "Shipping quote rate limiter is unavailable")
+	}
+	if !allowed {
+		c.Set("Retry-After", "60")
+		return fiber.NewError(429, "Shipping quote rate limit exceeded")
 	}
 	quote, err := s.quotes.Calculate(c.Context(), CostInput{Origin: origin, Destination: destination, Weight: weight})
 	if err != nil {

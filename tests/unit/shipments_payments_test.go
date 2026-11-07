@@ -3,6 +3,7 @@ package unit_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -91,11 +92,23 @@ func (q *quoteFixture) Calculate(_ context.Context, in shipments.CostInput) (shi
 	}, nil
 }
 
+type quotaFixture struct {
+	allowed bool
+	err     error
+	calls   int
+}
+
+func (q *quotaFixture) Allow(_ context.Context, _ string) (bool, error) {
+	q.calls++
+	return q.allowed, q.err
+}
+
 func TestShippingCostEndpointValidationAndLegacyPaymentScaffold(t *testing.T) {
 	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
 	quote := &quoteFixture{}
+	quota := &quotaFixture{allowed: true}
 	ses := sessions.NewService(nil, "unused-access", "unused-refresh")
-	shipments.NewService(nil, ses, quote).Routes(app)
+	shipments.NewService(nil, ses, quote, quota).Routes(app)
 	payments.NewService().Routes(app)
 	call := func(method, path, body string, status int) string {
 		t.Helper()
@@ -120,11 +133,15 @@ func TestShippingCostEndpointValidationAndLegacyPaymentScaffold(t *testing.T) {
 		`{"origin":1,"destination":2,"weight":-1}`,
 		`{"origin":1,"destination":2,"weight":100,"unknown":true}`,
 		`{"origin":"not a number","destination":2,"weight":100}`,
+		`{"origin":1.5,"destination":2,"weight":100}`,
+		`{"origin":1,"destination":"2.25","weight":100}`,
+		`{"origin":1,"destination":2,"weight":0.5}`,
+		`{"origin":1,"destination":2,"weight":2147483648}`,
 	} {
 		call("POST", "/shipments/cost", body, 400)
 	}
-	if quote.calls != 0 {
-		t.Fatal("invalid quote input reached provider")
+	if quote.calls != 0 || quota.calls != 0 {
+		t.Fatal("invalid quote input reached rate limiter or provider")
 	}
 	out := call("POST", "/shipments/cost", `{"origin":"1","destination":2,"weight":100}`, 201)
 	var response struct {
@@ -138,6 +155,16 @@ func TestShippingCostEndpointValidationAndLegacyPaymentScaffold(t *testing.T) {
 	}
 	if quote.calls != 1 {
 		t.Fatalf("want exactly one provider call, got %d", quote.calls)
+	}
+	quota.allowed = false
+	out = call("POST", "/shipments/cost", `{"origin":1,"destination":2,"weight":100}`, 429)
+	if !strings.Contains(out, "Too Many Requests") || quote.calls != 1 {
+		t.Fatalf("blocked rate limit must not call provider: %s, calls=%d", out, quote.calls)
+	}
+	quota.err = errors.New("redis unavailable")
+	out = call("POST", "/shipments/cost", `{"origin":1,"destination":2,"weight":100}`, 503)
+	if !strings.Contains(out, "Service Unavailable") || quote.calls != 1 {
+		t.Fatalf("rate limiter failure must fail closed: %s, calls=%d", out, quote.calls)
 	}
 	if v := call("POST", "/payments", `{}`, 201); v != "This action adds a new payment" {
 		t.Fatalf("Nest placeholder mismatch: %q", v)

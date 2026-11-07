@@ -26,9 +26,13 @@ The backend sends application/x-www-form-urlencoded POST to the configured base 
 
 jne:sicepat:ide:sap:jnt:ninja:tiki:lion:anteraja:pos:ncs:rex:rpx:sentral:star:wahana:dse
 
-The API credential is sent in the upstream key header, never to the browser. HTTP timeout is 10 seconds and response payload is capped at 1 MiB. Upstream HTTP/network/JSON failures return generic HTTP 502 without leaking the credential. JSON numbers and numeric strings are accepted, while nonpositive values, NaN/Infinity and unknown fields are rejected. This positive-input rule is deliberately stricter than NestJS numeric coercion.
+The API credential is sent in the upstream key header, never to the browser. HTTP timeout is 10 seconds and response payload is capped at 1 MiB. Upstream HTTP/network/JSON failures return generic HTTP 502 without leaking the credential. JSON numbers and numeric strings are accepted only when they coerce to positive whole numbers within signed 32-bit range; fractional, nonpositive, NaN/Infinity and unknown-field inputs are rejected before contacting the provider. RajaOngkir requires integer region IDs and weights (in grams). This integer-input rule is deliberately stricter than NestJS numeric coercion.
 
-Unit tests use a fake HTTP server to verify outbound request, form fields, header and response. Live RajaOngkir verification is NOT asserted without staging credentials.
+The public quote endpoint is protected by a Redis-backed, atomic, per-client-IP **fixed-window** quota (default 30 valid quote requests per 60 seconds across app replicas). Configure `RAJAONGKIR_RATE_LIMIT_PER_MINUTE` to an integer from 1 to 1000. Excess traffic returns HTTP 429 with `Retry-After: 60`; Redis errors fail closed with HTTP 503 so provider quota cannot be exhausted during an outage. Use a trusted reverse-proxy IP configuration in deployment so client IPs are resolved correctly; otherwise multiple users may share a single quota. The limiter applies only to valid, provider-configured quote requests; malformed requests are not sent to RajaOngkir.
+
+Shipment list and detail API timestamps use UTC ISO-8601 with **exactly three millisecond digits** (`.000Z` through `.999Z`), matching Prisma DateTime JSON, including nullable `deliveredAt`.
+
+Unit tests use a fake HTTP server to verify outbound request, form fields, header and response, and rate-limit deny/error paths. Redis integration tests verify per-IP isolation and atomic concurrency. Live RajaOngkir verification is NOT asserted without staging credentials.
 
 ## Authorization and production boundaries
 

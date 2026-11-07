@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/config"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
@@ -70,7 +71,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 	uservouchers.NewService(db, ses).Routes(httpApp)
 	orders.NewService(db, ses).Routes(httpApp)
 	payments.NewService().Routes(httpApp)
-	shipments.NewService(db, ses, quotes).Routes(httpApp)
+	shipments.NewService(db, ses, quotes, shipments.NewRedisCostRateLimiter(redisClient, cfg.RajaOngkirRateLimit, time.Minute)).Routes(httpApp)
 	media.NewService(store).Routes(httpApp)
 	carts.NewService(db, ses).Routes(httpApp)
 	categories.NewService(db, redisClient, ses).Routes(httpApp)

@@ -2,6 +2,8 @@ package integration_test
 
 import (
 	"context"
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,7 +51,7 @@ func TestShipmentOwnershipAdminStatusAndPendingPaymentScaffold(t *testing.T) {
 	}
 	shipment := domain.Shipment{
 		OrderID: order.ID.ID, Courier: "jne", Service: "REG", Cost: 5000,
-		Estimated: time.Now().UTC().Add(48 * time.Hour), Status: "PENDING",
+		Estimated: time.Now().UTC().Truncate(time.Second).Add(48 * time.Hour), Status: "PENDING",
 	}
 	if err := tx.Create(&shipment).Error; err != nil {
 		t.Fatal(err)
@@ -67,7 +69,7 @@ func TestShipmentOwnershipAdminStatusAndPendingPaymentScaffold(t *testing.T) {
 	otherToken := issue(other)
 	adminToken := issue(admin)
 	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
-	shipments.NewService(tx, ses, nil).Routes(app)
+	shipments.NewService(tx, ses, nil, nil).Routes(app)
 	payments.NewService().Routes(app)
 
 	testBody(t, testCall(t, app, "GET", "/shipments", "", "", 401))
@@ -79,7 +81,21 @@ func TestShipmentOwnershipAdminStatusAndPendingPaymentScaffold(t *testing.T) {
 	testBody(t, testCall(t, app, "GET", "/shipments/"+shipment.ID.ID, "", "", 401))
 	testBody(t, testCallAs(t, app, otherToken, "GET", "/shipments/"+shipment.ID.ID, "", "", 403))
 	found := testBody(t, testCallAs(t, app, ownerToken, "GET", "/shipments/"+shipment.ID.ID, "", "", 200))
-	if found["data"].(map[string]any)["id"] != shipment.ID.ID {
+	row := found["data"].(map[string]any)
+	if estimated, ok := row["estimated"].(string); !ok || !strings.HasSuffix(estimated, ".000Z") {
+		t.Fatalf("Prisma estimated timestamp mismatch: %v", row["estimated"])
+	}
+	prismaTimestamp := regexp.MustCompile(`\.\d{3}Z$`)
+	for _, field := range []string{"createdAt", "updatedAt"} {
+		if date, ok := row[field].(string); !ok || !prismaTimestamp.MatchString(date) {
+			t.Fatalf("Prisma %s timestamp mismatch: %v", field, row[field])
+		}
+	}
+	listed := feed["data"].([]any)[0].(map[string]any)
+	if estimated, ok := listed["estimated"].(string); !ok || !strings.HasSuffix(estimated, ".000Z") {
+		t.Fatalf("Prisma list timestamp mismatch: %v", listed["estimated"])
+	}
+	if row["id"] != shipment.ID.ID {
 		t.Fatalf("shipment lookup leaked wrong data: %v", found)
 	}
 	testBody(t, testCallAs(t, app, adminToken, "GET", "/shipments/"+shipment.ID.ID, "", "", 200))
