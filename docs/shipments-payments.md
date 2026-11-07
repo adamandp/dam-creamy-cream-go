@@ -16,7 +16,7 @@ Source of truth: adamandp/dam-creamy-cream-be (NestJS ShipmentsController, Shipm
 | PATCH | /payments/:id | Public inert scaffold | HTTP 200, literal "This action updates a #N payment" |
 | DELETE | /payments/:id | Public inert scaffold | HTTP 200, literal "This action removes a #N payment" |
 
-NestJS PaymentsService contains only those placeholder strings. Path parameters in its generated scaffold are coerced with JavaScript's unary plus; the Go port preserves numeric radix, infinity and exponential formatting on these inert text endpoints. It has no actual persisted CRUD, gateway, capture, settlement or refunds. Exposing the same responses does not implement payment processing. Checkout PR #3 creates a separate PENDING Payment record.
+NestJS PaymentsService contains only those placeholder strings. Path parameters in its generated scaffold are coerced with JavaScript's unary plus; the Go port preserves numeric radix, infinity and exponential formatting on these inert text endpoints. Radix-prefixed values require unsigned digits after the prefix: malformed values such as `0x-1` and `0b+1` stringify as `NaN`, just like JavaScript. It has no actual persisted CRUD, gateway, capture, settlement or refunds. Exposing the same responses does not implement payment processing. Checkout PR #3 creates a separate PENDING Payment record.
 
 ## RajaOngkir integration
 

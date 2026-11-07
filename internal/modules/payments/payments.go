@@ -33,7 +33,12 @@ func (s *Service) Routes(app fiber.Router) {
 	})
 }
 
-var jsDecimalNumber = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
+var (
+	jsDecimalNumber = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
+	jsBinaryDigits  = regexp.MustCompile(`^[01]+$`)
+	jsOctalDigits   = regexp.MustCompile(`^[0-7]+$`)
+	jsHexDigits     = regexp.MustCompile(`^[0-9a-fA-F]+$`)
+)
 
 // NestJS uses the JavaScript unary + on @Param('id') before interpolating the
 // number into a scaffold string. Handle Number()'s decimal, radix and infinity
@@ -60,7 +65,16 @@ func legacyNumericID(raw string) string {
 			base = 8
 		}
 		if base != 0 {
-			integer, valid := new(big.Int).SetString(s[2:], base)
+			// JavaScript's Number() accepts only unsigned digits after a radix
+			// prefix. big.Int.SetString also accepts a sign (e.g. "0x-1"
+			// becomes -1 after removing the prefix), which would break parity.
+			digits := s[2:]
+			if (base == 2 && !jsBinaryDigits.MatchString(digits)) ||
+				(base == 8 && !jsOctalDigits.MatchString(digits)) ||
+				(base == 16 && !jsHexDigits.MatchString(digits)) {
+				return "NaN"
+			}
+			integer, valid := new(big.Int).SetString(digits, base)
 			if !valid {
 				return "NaN"
 			}
