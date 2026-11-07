@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"mime/multipart"
 	"strconv"
 	"strings"
@@ -382,7 +383,13 @@ func (s *Service) catalog(c fiber.Ctx) error {
 		db = db.Where("(name ILIKE ? OR description ILIKE ?)", needle, needle)
 	}
 	if cat != "" {
-		db = db.Where("category_id IN ?", strings.Split(cat, ","))
+		ids := strings.Split(cat, ",")
+		for _, id := range ids {
+			if err := httpx.UUID(id); err != nil {
+				return err
+			}
+		}
+		db = db.Where("category_id IN ?", ids)
 	}
 	for _, cond := range []struct{ key, cmp string }{{"min", ">="}, {"max", "<="}} {
 		raw := c.Query(cond.key)
@@ -390,7 +397,7 @@ func (s *Service) catalog(c fiber.Ctx) error {
 			continue
 		}
 		n, err := strconv.ParseFloat(raw, 64)
-		if err != nil || n < 0 || n > 1000000 {
+		if err != nil || math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || n > 1000000 {
 			return fiber.NewError(400, fmt.Sprintf("%s must be within 0..1000000", cond.key))
 		}
 		db = db.Where("price "+cond.cmp+" ?", n)

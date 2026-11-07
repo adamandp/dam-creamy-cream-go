@@ -18,7 +18,7 @@ var namePattern = regexp.MustCompile("^[A-Za-z\\s]+$")
 
 // Name follows the public API's alphabetic/spaces rule without silently trimming input.
 func Name(value, field string, min, max int) error {
-	length := len([]rune(value))
+	length := httpx.JSStringLength(value)
 	if length < min || length > max || !namePattern.MatchString(value) {
 		return fiber.NewError(400, fmt.Sprintf("Invalid %s", field))
 	}
@@ -26,7 +26,7 @@ func Name(value, field string, min, max int) error {
 }
 
 func Text(value, field string, min, max int) error {
-	length := len([]rune(value))
+	length := httpx.JSStringLength(value)
 	if length < min || length > max {
 		return fiber.NewError(400, fmt.Sprintf("%s must be %d-%d characters", field, min, max))
 	}

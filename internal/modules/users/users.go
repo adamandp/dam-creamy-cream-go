@@ -135,10 +135,22 @@ var digit = regexp.MustCompile(`[0-9]`)
 var special = regexp.MustCompile(`[!@#$%^&*]`)
 
 func validatePassword(password string) error {
-	if len(password) < 8 || len(password) > 255 || !lowercase.MatchString(password) || !uppercase.MatchString(password) || !digit.MatchString(password) || !special.MatchString(password) {
+	if httpx.JSStringLength(password) < 8 || httpx.JSStringLength(password) > 255 || !lowercase.MatchString(password) || !uppercase.MatchString(password) || !digit.MatchString(password) || !special.MatchString(password) {
 		return fiber.NewError(400, "Password must be 8-255 chars with uppercase, lowercase, number and special character")
 	}
 	return nil
+}
+
+// Node's bcrypt implementation hashes at most the first 72 password bytes.
+// The Go implementation rejects inputs longer than 72 bytes instead. Apply
+// the same truncation for both verification and hashing to keep existing Nest
+// password hashes usable and prevent a previously valid password returning 500.
+func bcryptInput(password string) []byte {
+	raw := []byte(password)
+	if len(raw) > 72 {
+		return raw[:72]
+	}
+	return raw
 }
 func (s *Service) update(c fiber.Ctx) error {
 	id := c.Params("id")
@@ -277,13 +289,13 @@ func (s *Service) updatePassword(c fiber.Ctx) error {
 	if err := s.db.First(&u, "id = ?", id).Error; err != nil {
 		return err
 	}
-	if bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(body.ExistingPassword)) != nil {
+	if bcrypt.CompareHashAndPassword([]byte(u.Password), bcryptInput(body.ExistingPassword)) != nil {
 		return fiber.NewError(400, "🔐 Existing password is incorrect. Please try again with the correct one! 🙅‍♂️")
 	}
-	if bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(body.NewPassword)) == nil {
+	if bcrypt.CompareHashAndPassword([]byte(u.Password), bcryptInput(body.NewPassword)) == nil {
 		return fiber.NewError(400, "🔁 New password can't be the same as your current password. Try something different! 😉")
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), 10)
+	hash, err := bcrypt.GenerateFromPassword(bcryptInput(body.NewPassword), 10)
 	if err != nil {
 		return err
 	}

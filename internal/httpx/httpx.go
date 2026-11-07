@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -189,11 +190,18 @@ func statusText(code int) string {
 	}
 }
 func NonBlank(v string, min, max int, field string) error {
-	n := len([]rune(strings.TrimSpace(v)))
+	n := JSStringLength(strings.TrimSpace(v))
 	if n < min || n > max {
 		return fiber.NewError(400, fmt.Sprintf("%s must be %d-%d characters", field, min, max))
 	}
 	return nil
+}
+
+// JSStringLength mirrors JavaScript string.length (UTF-16 code units), which
+// NestJS/Zod use for min/max validation. Go's byte len or rune count would
+// reject valid multi-byte text or accept too many astral characters.
+func JSStringLength(value string) int {
+	return len(utf16.Encode([]rune(value)))
 }
 
 func BindStrict(c fiber.Ctx, dst any) error {
