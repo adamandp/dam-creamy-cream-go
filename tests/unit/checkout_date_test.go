@@ -24,7 +24,7 @@ func TestCheckoutEstimatedMatchesNestDateCoercion(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			raw := fmt.Sprintf(`{"shipment":{"courier":"jne","service":"regular","cost":8000,"estimated":%s}}`, tc.value)
+			raw := fmt.Sprintf(`{"shipment":{"courier":"jne","service":"regular","cost":8000,"estimated":%s,"description":null}}`, tc.value)
 			var request orders.CheckoutInput
 			err := json.Unmarshal([]byte(raw), &request)
 			if tc.invalid {
@@ -40,5 +40,27 @@ func TestCheckoutEstimatedMatchesNestDateCoercion(t *testing.T) {
 				t.Fatalf("estimated=%v want=%v", request.Shipment.Estimated, tc.want)
 			}
 		})
+	}
+}
+
+func TestCheckoutRequiresShipmentCostAndDescription(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"missing cost", `{"courier":"jne","service":"regular","estimated":"2026-12-01","description":null}`},
+		{"null cost", `{"courier":"jne","service":"regular","cost":null,"estimated":"2026-12-01","description":null}`},
+		{"missing description", `{"courier":"jne","service":"regular","cost":0,"estimated":"2026-12-01"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var request orders.CheckoutInput
+			if err := json.Unmarshal([]byte(`{"shipment":`+tc.payload+`}`), &request); err == nil {
+				t.Fatal("missing required shipment field was accepted")
+			}
+		})
+	}
+	var request orders.CheckoutInput
+	if err := json.Unmarshal([]byte(`{"shipment":{"courier":"jne","service":"regular","cost":0,"estimated":"2026-12-01","description":null}}`), &request); err != nil {
+		t.Fatalf("explicit null description and zero cost should be allowed: %v", err)
 	}
 }

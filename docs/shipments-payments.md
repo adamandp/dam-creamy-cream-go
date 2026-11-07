@@ -45,6 +45,8 @@ Important production limitations:
 1. Checkout PR #3 still accepts caller-supplied shipment.cost. The quote route is informational only and not linked to a signed/time-limited quote ID binding user, address, courier, weight and expiry.
 2. No payment gateway, reconciliation or actual PaymentsService processing exists. The /payments routes remain inert.
 3. No automatic stock release upon order expiry/cancellation, shipment booking, tracking reconciliation or refunds.
-4. The three PR #3 review findings (fractional-price rounding, FREE_ITEM quantity cap, and missing required shipment fields) are not fixed in this PR.
+4. PR #4 now includes follow-up fixes for three inherited PR #3 issues: order totals reconcile from cent-rounded **unit prices** (including fractional original prices and multiple quantities); `FREE_ITEM` rewards do not impose an arbitrary 100-unit limit (while rejecting signed-32-bit inventory overflow); and checkout requires shipment `cost` and `description` keys (`description: null` remains valid), matching the required NestJS DTO fields. Regression tests cover all three.
+
+**Shipping quote security boundary:** The public quote endpoint cannot by itself attest a checkout's shipping cost. Checkout currently has no provider-issued quote ID or origin/destination/weight fields, Address stores location names rather than RajaOngkir destination IDs, and Product has no weight. A production-safe quote binding needs an explicit FE/BE contract for selecting a short-lived quote and authoritative route/weight data. Until that design is agreed, shipping cost supplied by the browser is **not trusted** and checkout must not be exposed for real payments. The omission is tracked rather than claiming a token or price check that does not exist.
 
 No schema migration, Cloudinary change or dummy-login modification.

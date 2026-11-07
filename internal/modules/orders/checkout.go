@@ -73,8 +73,8 @@ func validateCheckout(b CheckoutInput, who sessions.Actor) error {
 	if b.Shipment.Estimated.IsZero() {
 		return badInput("shipment.estimated must be an RFC3339 timestamp")
 	}
-	if b.Shipment.Description != nil && len(*b.Shipment.Description) > 255 {
-		return badInput("shipment.description too long")
+	if b.Shipment.Description != nil && (len(*b.Shipment.Description) < 1 || len(*b.Shipment.Description) > 255) {
+		return badInput("shipment.description must have between 1 and 255 characters")
 	}
 	if len(strings.TrimSpace(b.Payment.Method)) < 1 || len(b.Payment.Method) > 50 {
 		return badInput("invalid payment.method")

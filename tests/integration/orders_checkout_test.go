@@ -121,6 +121,10 @@ func TestCheckoutAtomicPricingVoucherInventoryAndOwner(t *testing.T) {
 	// Public requests, cross-user address and unclaimed vouchers cannot create orders.
 	checkout(input, "", 401)
 	checkout(input, bobTokens.AccessToken, 403)
+	emptyDescription := ""
+	badShipment := input
+	badShipment.Shipment.Description = &emptyDescription
+	checkout(badShipment, tokens.AccessToken, 400)
 	bad := input
 	bad.Order.AddressID = foreign.ID.ID
 	checkout(bad, tokens.AccessToken, 409)
@@ -287,5 +291,27 @@ func TestCheckoutAtomicPricingVoucherInventoryAndOwner(t *testing.T) {
 	roundResult := roundResponse["data"].(map[string]any)
 	if roundResult["shippingCost"] != float64(0.01) || roundResult["voucherAmount"] != float64(0) || roundResult["finalPrice"] != float64(12000.01) {
 		t.Fatalf("fractional shipping with no voucher yielded inconsistent totals: %+v", roundResult)
+	}
+	// Price 0.005 rounds to one cent per paid unit. With two units the
+	// order's aggregate MUST equal its persisted OrderItem unit amounts.
+	if err := tx.Model(&ci).Update("quantity", 2).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Model(&product).Update("price", 0.005).Error; err != nil {
+		t.Fatal(err)
+	}
+	fractional := rounded
+	fractional.OrderItems = []orders.CheckoutItem{{ProductID: product.ID.ID, Quantity: 2}}
+	fractional.Shipment.Cost = 0
+	fractionalResult := checkout(fractional, tokens.AccessToken, 201)["data"].(map[string]any)
+	if fractionalResult["totalPrice"] != float64(0.02) || fractionalResult["finalPrice"] != float64(0.02) || fractionalResult["discountAmount"] != float64(0) {
+		t.Fatalf("fractional unit price did not reconcile with order total: %+v", fractionalResult)
+	}
+	var fractionalItem domain.OrderItem
+	if err := tx.Where("order_id = ?", fractionalResult["orderId"]).First(&fractionalItem).Error; err != nil {
+		t.Fatal(err)
+	}
+	if fractionalItem.Price != 0.01 || fractionalItem.FinalPrice != 0.01 || fractionalItem.Quantity != 2 {
+		t.Fatalf("persisted fractional unit price mismatched order: %+v", fractionalItem)
 	}
 }
