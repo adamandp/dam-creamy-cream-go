@@ -1,0 +1,35 @@
+name: Format PR5 Go code
+on:
+  push:
+    branches:
+      - feat/remaining-domains-parity
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Format only PR5 Go sources
+        run: |
+          gofmt -w internal/app/bootstrap.go \
+            internal/modules/legacyviews/views.go \
+            internal/modules/notifications/notifications.go \
+            internal/modules/productanalytics/productanalytics.go \
+            internal/modules/recommendations/recommendations.go \
+            internal/modules/reviews/reviews.go \
+            internal/modules/usernotifications/usernotifications.go \
+            tests/integration/remaining_domains_test.go
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add internal/app/bootstrap.go internal/modules tests/integration/remaining_domains_test.go
+            git commit -m "style: gofmt remaining NestJS domain modules"
+            git push origin HEAD:feat/remaining-domains-parity
+          fi

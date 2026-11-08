@@ -112,3 +112,21 @@ POST /orders/checkout exposes an explicit authenticated API contract for the exi
 - PATCH /shipments/:id/status: admin access JWT, body {"status":"SHIPPED"}, enum PENDING/SHIPPED/DELIVERED/CANCELLED; changes only Shipment status.
 - POST /shipments/cost: HTTP 201, public body {"origin":123,"destination":456,"weight":1000}; sends a server-only key to RajaOngkir; returns {message,status,data}. Missing config 503, upstream failure 502. Does not validate Checkout shipping fees.
 - Payments POST/GET/PATCH/DELETE endpoints reproduce NestJS scaffold literal text only; there is no payment mutation. See [PR #4 contract](shipments-payments.md).
+## PR #5: Reviews, Recommendations, Analytics and Notifications
+
+The original NestJS routes are now registered in the stacked Go branch:
+
+| Domain | Routes |
+|---|---|
+| Reviews | `POST /reviews`, `GET /reviews`, `GET /reviews/product/:id`, `GET /reviews/:id`, `GET /reviews/me`, `PATCH /reviews/:id`, `DELETE /reviews/:id` |
+| Recommendations | `GET /recommendations/classic`, `GET /recommendations/categories`, `GET /recommendations/offers`, `GET /recommendations/related/:id` |
+| Product Analytics | `POST /product-analytics`, `GET /product-analytics/product/:id`, `GET /product-analytics/user`, `GET /product-analytics/product/:id/count` |
+| Notifications | `POST /notifications`, `GET /notifications`, `GET /notifications/:id`, `PATCH /notifications/:id`, `DELETE /notifications/:id` |
+| User Notifications | `POST /user-notifications`, `GET /user-notifications`, `GET /user-notifications/:id`, `GET /user-notifications/me`, `GET /user-notifications/count/me`, `GET /user-notifications/notification/:id`, `GET /user-notifications/notification/:id/count`, `PATCH /user-notifications/:id` |
+
+`GET /reviews/me`, `GET /product-analytics/user`, `GET /user-notifications/me`
+and `GET /user-notifications/count/me` require the verified Go bearer token.
+The other routes retain NestJS's public route surface. The original DTO
+validation, pagination and several unusual source-specific database queries
+are intentionally retained; see `parity.md`. An absent collection returns 404
+on the corresponding paginated list, matching the original service.

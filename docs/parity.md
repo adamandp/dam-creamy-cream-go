@@ -24,11 +24,11 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 | Orders | orders | PR #3 PORT + TESTS | Explicit Go HTTP checkout/list/detail surface, atomic Order/OrderItem/Payment/Shipment writes, stock locks, cart decrement, discount and voucher validation; original Nest has CQRS steps but no HTTP Orders route. |
 | Payments | payments | PR #4 SCAFFOLD PARITY + TESTS | NestJS PaymentService only returns literal strings; matching endpoints never charge or mutate payment records. |
 | Shipments | shipments | PR #4 PORT + TESTS | List/detail, status PATCH, public cost proxy via RajaOngkir with Redis per-IP and global provider quotas, explicit trusted proxies, positive integer provider inputs, and Prisma millisecond UTC timestamps; owner/admin ACL deliberately fixes unauthenticated legacy reads/writes. External carrier API needs real-credential verification. |
-| Reviews | reviews | PENDING | User/product reviews. |
-| Recommendations | recommendations | PENDING | Classic, category, offers, related. |
-| Product Analytics | productanalytics | PENDING | Product views/counts. |
-| Notifications | notifications | PENDING | CRUD. |
-| User Notifications | usernotifications | PENDING | User-specific feed/read/counts. |
+| Reviews | reviews | PR #5 PORT + TESTS | Create/list/detail/product/me/update/delete, including source global-count pagination. |
+| Recommendations | recommendations | PR #5 PORT + TESTS | Classic, categories, offers, related; original ranking/discount formulas. |
+| Product Analytics | productanalytics | PR #5 PORT + TESTS | Create, product/user views and count; original global-count pagination. |
+| Notifications | notifications | PR #5 PORT + TESTS | CRUD and existing DTO constraints. |
+| User Notifications | usernotifications | PR #5 PORT + TESTS | CRUD subset, feed, read and counts with nested Notification JSON. |
 
 ## Non-negotiable before cutting over
 
@@ -50,6 +50,44 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 - Role pagination keeps the original `Category retrieved` response message from `roles.service.ts`, even though it looks incorrect.
 
 No unimplemented business logic is represented as complete.
+
+## PR #5 — Remaining five NestJS domains
+
+All 28 remaining NestJS controller routes are registered in the Go branch:
+Reviews (7), Recommendations (4), Product Analytics (4), Notifications (5),
+and User Notifications (8). Each module ports the existing service's query,
+response and mutation semantics; this **does not certify whole-app 1:1 parity**.
+
+The source has behaviors that appear defective but were deliberately retained
+for the requested source-first rewrite:
+
+- `ReviewsService.findByUser` and `.findByProduct` use a **global** Review count
+  in pagination, even though rows are scoped.
+- Product Analytics pages also use a **global** count.
+- `UserNotificationsService.findByNotification` and `.findByNotificationCount`
+  filter `user_id` with the **notification ID**, not `notification_id`.
+- User notification count includes read records; it is not an unread count.
+- Recommendations deliberately use their own historical discount computation
+  rather than the corrected Catalog/Checkout shared price calculation. The
+  offers percentage-ranking expression uses `discount.value / 100`, and the
+  source takes its first five offers **before** sorting them.
+- Nullable Product Analytics IDs still use the source's misspelled `unkown`
+  fallback, which is invalid for the UUID database columns. No schema change
+  or silent rewrite was introduced.
+- Nest's Notification Zod title length allows 100 characters although the
+  underlying Prisma VARCHAR(50) column is narrower.
+
+All five modules expose the source's public mutation routes as-is. The `me`
+endpoints use the existing Go verified-current-actor middleware rather than
+Nest's signature-free JWT decode; this is an inherited, documented security
+deviation. A separate authorization design change should not be mixed with
+this compatibility port.
+
+Integration tests exercise all five domains against the existing disposable
+PostgreSQL schema. They also pin source-specific counts, nesting and filters.
+The end-to-end NestJS-to-Go HTTP replay currently covers the Promotions subset,
+**not** every original route. Before merge/cutover, full side-by-side seeded
+replay and independent review are still required.
 
 
 ## PR #1 regression and real-service tests (November 4, 2026)
