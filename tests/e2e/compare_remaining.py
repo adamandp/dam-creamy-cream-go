@@ -71,7 +71,7 @@ failed = 0
 tested = 0
 
 
-def verify(label, method, path, payload=None, authorized=True, route_fix=False):
+def verify(label, method, path, payload=None, authorized=True, approved_difference=None):
     global match, approved, failed, tested
     tested += 1
     nest = request(NEST, method, path, payload, authorized)
@@ -80,9 +80,26 @@ def verify(label, method, path, payload=None, authorized=True, route_fix=False):
         match += 1
         print(f"MATCH {label}: {nest[0]}", flush=True)
         return
-    if route_fix and nest[0] == 400 and go[0] == 200:
+    allowed = False
+    if approved_difference == "missing_query":
+        # ReviewsController.findAll has no @Query() argument decorator. Nest
+        # passes undefined and ReviewsService destructuring crashes with 500.
+        allowed = nest == (500, {"statusCode": 500, "message": "Internal server error"}) and go[0] == 200
+    elif approved_difference == "review_me_shadow":
+        # Nest registers /reviews/:id before /reviews/me (no UUID pipe).
+        allowed = nest[0] == 500 and "invalid input syntax for type uuid" in str(nest[1]) and go[0] == 200
+    elif approved_difference == "user_notification_me_shadow":
+        allowed = nest[0] == 400 and go[0] == 200
+    elif approved_difference == "go_error_envelope":
+        # The pre-existing Go shared error handler adds `error` to 404s;
+        # preserve its project-wide convention rather than changing it here.
+        allowed = (nest[0] == go[0] == 404 and isinstance(nest[1], dict)
+                   and isinstance(go[1], dict)
+                   and {k: v for k, v in go[1].items() if k != "error"} == nest[1]
+                   and go[1].get("error") == "Not Found")
+    if allowed:
         approved += 1
-        print(f"APPROVED legacy route shadow {label}: Nest=400 Go=200", flush=True)
+        print(f"APPROVED {approved_difference} {label}: Nest={nest[0]} Go={go[0]}", flush=True)
         return
     failed += 1
     print(f"FAIL {label}: Nest={nest[0]} Go={go[0]}", flush=True)
@@ -91,28 +108,28 @@ def verify(label, method, path, payload=None, authorized=True, route_fix=False):
 
 
 # All read contracts before any writes, on identical seeded databases.
-for path, route_fix in [
-    ("/reviews", False),
-    ("/reviews/product/" + PRODUCT, False),
-    ("/reviews/" + REVIEW, False),
-    ("/reviews/me", True),
-    ("/recommendations/classic", False),
-    ("/recommendations/categories", False),
-    ("/recommendations/offers", False),
-    ("/recommendations/related/" + PRODUCT, False),
-    ("/product-analytics/product/" + PRODUCT, False),
-    ("/product-analytics/user", False),
-    ("/product-analytics/product/" + PRODUCT + "/count", False),
-    ("/notifications", False),
-    ("/notifications/" + NOTIFICATION, False),
-    ("/user-notifications", False),
-    ("/user-notifications/" + USER_NOTIFICATION, False),
-    ("/user-notifications/me", True),
-    ("/user-notifications/count/me", False),
-    ("/user-notifications/notification/" + NOTIFICATION, False),
-    ("/user-notifications/notification/" + NOTIFICATION + "/count", False),
+for path, difference in [
+    ("/reviews", "missing_query"),
+    ("/reviews/product/" + PRODUCT, None),
+    ("/reviews/" + REVIEW, None),
+    ("/reviews/me", "review_me_shadow"),
+    ("/recommendations/classic", None),
+    ("/recommendations/categories", None),
+    ("/recommendations/offers", None),
+    ("/recommendations/related/" + PRODUCT, None),
+    ("/product-analytics/product/" + PRODUCT, None),
+    ("/product-analytics/user", None),
+    ("/product-analytics/product/" + PRODUCT + "/count", None),
+    ("/notifications", None),
+    ("/notifications/" + NOTIFICATION, None),
+    ("/user-notifications", None),
+    ("/user-notifications/" + USER_NOTIFICATION, None),
+    ("/user-notifications/me", "user_notification_me_shadow"),
+    ("/user-notifications/count/me", None),
+    ("/user-notifications/notification/" + NOTIFICATION, "go_error_envelope"),
+    ("/user-notifications/notification/" + NOTIFICATION + "/count", None),
 ]:
-    verify("GET " + path, "GET", path, route_fix=route_fix)
+    verify("GET " + path, "GET", path, approved_difference=difference)
 
 
 # Mutation contracts use stable seeded rows. New IDs are not compared after

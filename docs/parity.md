@@ -63,6 +63,11 @@ for the requested source-first rewrite:
 
 - `ReviewsService.findByUser` and `.findByProduct` use a **global** Review count
   in pagination, even though rows are scoped.
+- `ReviewsController.findAll` never injects `@Query()`, so the NestJS route
+  crashes with 500; Go intentionally exposes the underlying working service
+  list and returns 200. `GET /reviews/me` and `GET /user-notifications/me`
+  are shadowed by their preceding `/:id` route in Nest; Go registers the
+  intended static routes first. These are explicit HTTP behavior deviations.
 - Product Analytics pages also use a **global** count.
 - `UserNotificationsService.findByNotification` and `.findByNotificationCount`
   filter `user_id` with the **notification ID**, not `notification_id`.
@@ -76,6 +81,9 @@ for the requested source-first rewrite:
   or silent rewrite was introduced.
 - Nest's Notification Zod title length allows 100 characters although the
   underlying Prisma VARCHAR(50) column is narrower.
+- The existing Go shared error handler adds `error: "Not Found"` to an HTTP
+  404, while the NestJS custom exception returns only statusCode/message.
+  Do not change the earlier Go modules' global error format in this batch.
 
 All five modules expose the source's public mutation routes as-is. The `me`
 endpoints use the existing Go verified-current-actor middleware rather than

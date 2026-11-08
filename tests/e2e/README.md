@@ -52,10 +52,19 @@ isolated databases and invokes `compare_remaining.py` **before** the Promotions
 mutations. It covers all 28 original HTTP routes across Reviews (7),
 Recommendations (4), Product Analytics (4), Notifications (5) and User
 Notifications (8). Stable seeded rows and JSON responses are compared exactly;
-only two source route shadows (`GET /reviews/me` and
-`GET /user-notifications/me`) can be allowlisted when NestJS returns the
-legacy UUID validation error while Go serves the intended route. Extra
-unapproved differences fail the audit.
+four documented differences are allowlisted with explicit assertions:
+1. `GET /reviews` crashes in Nest (500) because its controller argument is
+   missing `@Query()`; Go serves the intended paginated list (200).
+2. `GET /reviews/me` is shadowed by `GET /reviews/:id` in Nest (500 due invalid
+   UUID); Go serves the intended self-scoped feed (200).
+3. `GET /user-notifications/me` is shadowed by its `/:id` handler in Nest
+   (400); Go serves the intended feed (200).
+4. A 404 from `GET /user-notifications/notification/:id` has the same status
+   and message but the existing Go error handler adds an `error` field.
+
+Other unapproved differences fail the audit. The observed first side-by-side
+run matched 24/28 exactly; the four known differences above are tested
+separately and do not imply full application equivalence.
 
 GitHub Actions has a dedicated `nest-parity` job that builds the original
 NestJS source and runs this side-by-side script against disposable containers.
