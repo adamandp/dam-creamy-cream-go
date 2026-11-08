@@ -90,9 +90,15 @@ func (s *Service) prepareCheckout(tx *gorm.DB, body CheckoutInput, now time.Time
 				First(&association).Error; err != nil {
 				return cart, data, unavailable("Discount is not active for this product")
 			}
+			if discountQuantities[*item.DiscountID] > 2147483647-item.Quantity {
+				return cart, data, unavailable("Discount quantity exceeds inventory limits")
+			}
 			discountQuantities[*item.DiscountID] += item.Quantity
 		}
 		data.items = append(data.items, p)
+		if data.allQuantities[item.ProductID] > 2147483647-item.Quantity {
+			return cart, data, unavailable("Order quantity exceeds inventory limits")
+		}
 		data.allQuantities[item.ProductID] += item.Quantity
 	}
 	// Each shared discount is locked once and quota is checked using the sum of

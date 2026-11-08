@@ -48,8 +48,9 @@ func validateCheckout(b CheckoutInput, who sessions.Actor) error {
 		if err := httpx.UUID(item.ProductID); err != nil {
 			return err
 		}
-		if item.Quantity < 1 {
-			return badInput("item quantity must be positive")
+		// OrderItem.quantity is a PostgreSQL INTEGER, not a Go int64.
+		if item.Quantity < 1 || item.Quantity > 2147483647 {
+			return badInput("item quantity must be a positive 32-bit integer")
 		}
 		if items[item.ProductID] {
 			return badInput("duplicate productId in orderItems")

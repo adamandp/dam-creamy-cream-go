@@ -3,6 +3,7 @@ package integration_test
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -119,4 +120,50 @@ Great flavor`
 	if res.StatusCode != 404 {
 		t.Errorf("inactive products should not be visible in first catalog page, got %d", res.StatusCode)
 	}
+}
+
+// Prisma's contains filter performs literal substring matching. PostgreSQL
+// ILIKE must not interpret customer-entered '%' or '_' as SQL wildcards.
+func TestCatalogSearchMetacharactersMatchPrismaContains(t *testing.T) {
+	db := connectPrismaFixture(t)
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	cat := domain.Category{Name: "Search Regex Fixture", IsActive: true}
+	if err := tx.Create(&cat).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Vanilla 100%", "Vanilla_Classic", "Vanilla! Special", "Vanilla Basic"} {
+		if err := tx.Create(&domain.Product{CategoryID: cat.ID.ID, Name: name, Price: 10000, IsActive: true}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
+	products.NewService(tx, stubImageStore{}, sessions.NewService(tx, "search-access", "search-refresh")).Routes(app)
+	for _, tc := range []struct {
+		q    string
+		want string
+	}{
+		{"%", "Vanilla 100%"},
+		{"_", "Vanilla_Classic"},
+		{"!", "Vanilla! Special"},
+		{"Vanilla", ""},
+	} {
+		result := testBody(t, testCall(t, app, "GET", "/products/catalog?cat="+cat.ID.ID+"&q="+url.QueryEscape(tc.q), "", "", 200))
+		rows := requiredRows(t, result)
+		if tc.want == "" {
+			if len(rows) != 4 {
+				t.Fatalf("literal search %q returned %d rows, expected 4", tc.q, len(rows))
+			}
+			continue
+		}
+		if len(rows) != 1 || rows[0].(map[string]any)["name"] != tc.want {
+			t.Fatalf("literal search %q returned %+v, expected only %q", tc.q, rows, tc.want)
+		}
+	}
+	// A query with percent signs and underscores must not match arbitrary
+	// products if no matching literal occurs in any product field.
+	testBody(t, testCall(t, app, "GET", "/products/catalog?cat="+cat.ID.ID+"&q="+url.QueryEscape("%_%"), "", "", 404))
 }

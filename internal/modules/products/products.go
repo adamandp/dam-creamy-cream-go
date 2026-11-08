@@ -423,8 +423,12 @@ func (s *Service) catalog(c fiber.Ctx) error {
 	}
 	db := s.db.Model(&domain.Product{}).Where("is_active = ?", true)
 	if q != "" {
-		needle := "%" + q + "%"
-		db = db.Where("(name ILIKE ? OR description ILIKE ?)", needle, needle)
+		// Prisma contains treats %, _ and \ as literal search text. SQL
+		// ILIKE treats the first two as wildcards; escaping them also prevents
+		// user searches from unexpectedly matching the entire catalog.
+		escaped := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(q)
+		needle := "%" + escaped + "%"
+		db = db.Where("(name ILIKE ? ESCAPE '!' OR description ILIKE ? ESCAPE '!')", needle, needle)
 	}
 	if len(categoryIDs) > 0 {
 		db = db.Where("category_id IN ?", categoryIDs)

@@ -78,11 +78,11 @@ func (s *Service) update(c fiber.Ctx) error {
 		return err
 	}
 	// Reject invalid quantities without touching persistent state.
-	if body.Quantity != nil && *body.Quantity < 0 {
-		return fiber.NewError(400, "quantity must not be negative")
+	if body.Quantity != nil && (*body.Quantity < 0 || *body.Quantity > 2147483647) {
+		return fiber.NewError(400, "quantity must be within the nonnegative 32-bit integer range")
 	}
-	if body.ReservedQuantity != nil && *body.ReservedQuantity < 0 {
-		return fiber.NewError(400, "reservedQuantity must not be negative")
+	if body.ReservedQuantity != nil && (*body.ReservedQuantity < 0 || *body.ReservedQuantity > 2147483647) {
+		return fiber.NewError(400, "reservedQuantity must be within the nonnegative 32-bit integer range")
 	}
 	if body.ProductID != nil {
 		if err := httpx.UUID(*body.ProductID); err != nil {

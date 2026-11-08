@@ -89,5 +89,6 @@ if [ "$nest_status" != 200 ] || [ "$go_status" != 200 ];then
  echo "Nest startup status $nest_status; Go startup status $go_status"
  tail -35 "$base/nest-compare.log";tail -35 "$base/go-compare.log";exit 2
 fi
+"$PYTHON" "$dir/tests/e2e/compare_core.py"
 "$PYTHON" "$dir/tests/e2e/compare_remaining.py"
 "$PYTHON" "$dir/tests/e2e/compare_promotions.py"

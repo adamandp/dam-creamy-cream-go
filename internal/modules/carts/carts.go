@@ -76,7 +76,21 @@ func (s *Service) add(c fiber.Ctx) error {
 			return err
 		}
 		item := domain.CartItem{CartID: cart.ID.ID, ProductID: body.ProductID, Quantity: body.Quantity}
-		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "cart_id"}, {Name: "product_id"}}, DoUpdates: clause.Assignments(map[string]any{"quantity": gorm.Expr("cart_items.quantity + EXCLUDED.quantity"), "updated_at": time.Now().UTC()})}).Create(&item).Error
+		// The unique upsert is atomic. Its WHERE condition protects Prisma's
+		// PostgreSQL INTEGER column from overflowing after repeated additions.
+		// Checking the old quantity in application code would race another add.
+		result := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "cart_id"}, {Name: "product_id"}},
+			DoUpdates: clause.Assignments(map[string]any{"quantity": gorm.Expr("cart_items.quantity + EXCLUDED.quantity"), "updated_at": time.Now().UTC()}),
+			Where:     clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "cart_items.quantity <= 2147483647 - EXCLUDED.quantity"}}},
+		}).Create(&item)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return fiber.NewError(409, "Cart quantity exceeds inventory limits")
+		}
+		return nil
 	})
 	if err != nil {
 		return err

@@ -53,3 +53,24 @@ func TestCheckoutDescriptionAndCourierMatchNestUTF16Limits(t *testing.T) {
 		t.Fatal("NestJS rejects a description exceeding 255 UTF-16 units")
 	}
 }
+
+func TestCheckoutRejectsQuantitiesOutsidePrismaIntegerRange(t *testing.T) {
+	const userID = "123e4567-e89b-42d3-a456-426614174000"
+	const addressID = "123e4567-e89b-42d3-a456-426614174001"
+	const productID = "123e4567-e89b-42d3-a456-426614174002"
+	in := CheckoutInput{}
+	in.Order.UserID = userID
+	in.Order.AddressID = addressID
+	in.OrderItems = []CheckoutItem{{ProductID: productID, Quantity: 2147483648}}
+	in.Shipment.Cost = 1000
+	in.Shipment.Estimated = time.Now().UTC().Add(time.Hour)
+	in.Shipment.Courier, in.Shipment.Service = "jne", "regular"
+	in.Payment.Method = "cash"
+	if err := validateCheckout(in, sessions.Actor{UserID: userID}); err == nil {
+		t.Fatal("checkout quantity greater than PostgreSQL INTEGER must be rejected before any DB write")
+	}
+	in.OrderItems[0].Quantity = 2147483647
+	if err := validateCheckout(in, sessions.Actor{UserID: userID}); err != nil {
+		t.Fatalf("the signed 32-bit upper bound should remain syntactically valid: %v", err)
+	}
+}
