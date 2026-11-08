@@ -85,9 +85,12 @@ this compatibility port.
 
 Integration tests exercise all five domains against the existing disposable
 PostgreSQL schema. They also pin source-specific counts, nesting and filters.
-The end-to-end NestJS-to-Go HTTP replay currently covers the Promotions subset,
-**not** every original route. Before merge/cutover, full side-by-side seeded
-replay and independent review are still required.
+The end-to-end harness now includes all 28 routes from these five domains with
+deterministic seeded data and a separate NestJS server in the CI `nest-parity`
+job, in addition to the original Promotions replay. These are selected route
+cases, **not** an exhaustive full-application business-parity proof. Before
+cutover, checkout/auth/stock edge cases and real external providers still
+require independent verification.
 
 
 ## PR #1 regression and real-service tests (November 4, 2026)

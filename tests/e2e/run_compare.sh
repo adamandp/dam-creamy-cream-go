@@ -55,6 +55,7 @@ for db in goapi nestapi;do
   docker exec -i "$pg" psql -v ON_ERROR_STOP=1 -U postgres -d "$db" < "$sql" >/dev/null
  done
  docker exec -i "$pg" psql -v ON_ERROR_STOP=1 -U postgres -d "$db" < "$dir/tests/e2e/fixtures/promotions.sql" >/dev/null
+ docker exec -i "$pg" psql -v ON_ERROR_STOP=1 -U postgres -d "$db" < "$dir/tests/e2e/fixtures/remaining_domains.sql" >/dev/null
 done
 cd "$dir"
 go build -o "$base/go-compare-api" ./cmd/api
@@ -88,4 +89,5 @@ if [ "$nest_status" != 200 ] || [ "$go_status" != 200 ];then
  echo "Nest startup status $nest_status; Go startup status $go_status"
  tail -35 "$base/nest-compare.log";tail -35 "$base/go-compare.log";exit 2
 fi
+"$PYTHON" "$dir/tests/e2e/compare_remaining.py"
 "$PYTHON" "$dir/tests/e2e/compare_promotions.py"

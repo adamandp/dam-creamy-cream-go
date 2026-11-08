@@ -183,7 +183,8 @@ func TestRemainingFiveNestModulesContracts(t *testing.T) {
 	if again := requiredData(t, testBody(t, testCallAs(t, app, tokens.AccessToken, "GET", "/user-notifications/count/me", "", "", 200))); again["count"] != float64(1) {
 		t.Fatalf("source counts read notifications too: %v", again)
 	}
-	// Deletion is hard delete, and fails where a UserNotification still references it.
-	testBody(t, testCall(t, app, "DELETE", "/notifications/"+n.ID.ID, "", "", 409))
 	testBody(t, testCall(t, app, "DELETE", "/reviews/"+review.ID.ID, "", "", 200))
+	// The FK violation aborts this fixture transaction. Keep it as the last
+	// assertion, then let the deferred rollback cleanly discard the fixture.
+	testBody(t, testCall(t, app, "DELETE", "/notifications/"+n.ID.ID, "", "", 409))
 }
