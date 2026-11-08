@@ -33,7 +33,7 @@ func Notification(m domain.Notification) fiber.Map {
 func UserNotification(m domain.UserNotification, related *domain.Notification) fiber.Map {
 	view := fiber.Map{
 		"id": m.ID.ID, "userId": m.UserID, "notificationId": m.NotificationID,
-		"isRead": m.IsRead,
+		"isRead":    m.IsRead,
 		"createdAt": promotionutil.TimeString(m.CreatedAt), "updatedAt": promotionutil.TimeString(m.UpdatedAt),
 	}
 	if related != nil {

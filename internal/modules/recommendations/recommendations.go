@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-type Service struct { db *gorm.DB }
+type Service struct{ db *gorm.DB }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db} }
 
@@ -22,41 +22,47 @@ func (s *Service) Routes(app fiber.Router) {
 }
 
 type discount struct {
-	Type string
+	Type  string
 	Value *float64
 }
 
 type recommendation struct {
-	Product domain.Product
-	Rate float64
-	Sales int64
+	Product  domain.Product
+	Rate     float64
+	Sales    int64
 	Discount *discount
 }
 
 type recommendationView struct {
-	ID string `json:"id"`
-	Name string `json:"name"`
-	ImageURL string `json:"imageUrl"`
-	Description string `json:"description"`
-	Rate float64 `json:"rate"`
-	Price float64 `json:"price"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	ImageURL      string   `json:"imageUrl"`
+	Description   string   `json:"description"`
+	Rate          float64  `json:"rate"`
+	Price         float64  `json:"price"`
 	DiscountPrice *float64 `json:"discountPrice"`
-	DiscountType *string `json:"discountType"`
+	DiscountType  *string  `json:"discountType"`
 	DiscountValue *float64 `json:"discountValue"`
 }
 
 func (p recommendation) view() recommendationView {
 	v := recommendationView{ID: p.Product.ID.ID, Name: p.Product.Name, Rate: p.Rate, Price: p.Product.Price}
-	if p.Product.ImageURL != nil { v.ImageURL = *p.Product.ImageURL }
-	if p.Product.Description != nil { v.Description = *p.Product.Description }
+	if p.Product.ImageURL != nil {
+		v.ImageURL = *p.Product.ImageURL
+	}
+	if p.Product.Description != nil {
+		v.Description = *p.Product.Description
+	}
 	// This intentionally uses NestJS RecommendationsService's own calculation,
 	// not the corrected shared Cart/Catalog/Checkout pricing rules.
 	if p.Discount != nil && p.Discount.Value != nil && *p.Discount.Value != 0 {
 		v.DiscountType, v.DiscountValue = &p.Discount.Type, p.Discount.Value
 		amount := 0.0
 		switch p.Discount.Type {
-		case "FIXED": amount = *p.Discount.Value
-		case "PERCENTAGE": amount = *p.Discount.Value * p.Product.Price / 100
+		case "FIXED":
+			amount = *p.Discount.Value
+		case "PERCENTAGE":
+			amount = *p.Discount.Value * p.Product.Price / 100
 		}
 		price := p.Product.Price - amount
 		v.DiscountPrice = &price
@@ -66,13 +72,17 @@ func (p recommendation) view() recommendationView {
 
 func productViews(rows []recommendation) []recommendationView {
 	views := make([]recommendationView, 0, len(rows))
-	for _, row := range rows { views = append(views, row.view()) }
+	for _, row := range rows {
+		views = append(views, row.view())
+	}
 	return views
 }
 
 func rankByRatingAndSales(rows []recommendation) {
 	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Rate != rows[j].Rate { return rows[i].Rate > rows[j].Rate }
+		if rows[i].Rate != rows[j].Rate {
+			return rows[i].Rate > rows[j].Rate
+		}
 		return rows[i].Sales > rows[j].Sales
 	})
 }
@@ -81,7 +91,9 @@ func rankByRatingAndSales(rows []recommendation) {
 // active ProductDiscount and its Discount) produce the same response fields.
 func (s *Service) decorate(c fiber.Ctx, products []domain.Product) ([]recommendation, error) {
 	result := make([]recommendation, len(products))
-	if len(products) == 0 { return result, nil }
+	if len(products) == 0 {
+		return result, nil
+	}
 	ids := make([]string, 0, len(products))
 	byID := make(map[string]int, len(products))
 	for i, product := range products {
@@ -89,25 +101,47 @@ func (s *Service) decorate(c fiber.Ctx, products []domain.Product) ([]recommenda
 		ids = append(ids, product.ID.ID)
 		byID[product.ID.ID] = i
 	}
-	var reviews []struct { ProductID string; Rate float64 }
+	var reviews []struct {
+		ProductID string
+		Rate      float64
+	}
 	err := s.db.WithContext(c.Context()).Table("reviews").
 		Select("product_id, AVG(rating)::double precision AS rate").Where("product_id IN ?", ids).
 		Group("product_id").Scan(&reviews).Error
-	if err != nil { return nil, err }
-	for _, r := range reviews { result[byID[r.ProductID]].Rate = r.Rate }
-	var sales []struct { ProductID string; Total int64 }
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range reviews {
+		result[byID[r.ProductID]].Rate = r.Rate
+	}
+	var sales []struct {
+		ProductID string
+		Total     int64
+	}
 	err = s.db.WithContext(c.Context()).Table("order_items").
 		Select("product_id, COUNT(*) AS total").Where("product_id IN ?", ids).
 		Group("product_id").Scan(&sales).Error
-	if err != nil { return nil, err }
-	for _, r := range sales { result[byID[r.ProductID]].Sales = r.Total }
-	var discounts []struct { ProductID string; DiscountType string; Value *float64 }
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range sales {
+		result[byID[r.ProductID]].Sales = r.Total
+	}
+	var discounts []struct {
+		ProductID    string
+		DiscountType string
+		Value        *float64
+	}
 	err = s.db.WithContext(c.Context()).Table("product_discounts AS pd").
 		Select("pd.product_id, d.discount_type, d.value").
 		Joins("JOIN discounts AS d ON d.id = pd.discount_id").
 		Where("pd.is_active = ? AND pd.product_id IN ?", true, ids).Scan(&discounts).Error
-	if err != nil { return nil, err }
-	for _, d := range discounts { result[byID[d.ProductID]].Discount = &discount{Type: d.DiscountType, Value: d.Value} }
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range discounts {
+		result[byID[d.ProductID]].Discount = &discount{Type: d.DiscountType, Value: d.Value}
+	}
 	return result, nil
 }
 
@@ -117,18 +151,28 @@ func (s *Service) classic(c fiber.Ctx) error {
 		Joins("JOIN category ON category.id = products.category_id").
 		Where("products.is_active = ? AND category.name ILIKE ?", true, "%Classic%").
 		Find(&products).Error
-	if err != nil { return err }
-	if len(products) == 0 { return httpx.NotFound("Classic Recommendations") }
+	if err != nil {
+		return err
+	}
+	if len(products) == 0 {
+		return httpx.NotFound("Classic Recommendations")
+	}
 	rows, err := s.decorate(c, products)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	rankByRatingAndSales(rows)
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Classic Recommendations"), Data: productViews(rows)})
 }
 
 func (s *Service) categories(c fiber.Ctx) error {
 	var categories []domain.Category
-	if err := s.db.WithContext(c.Context()).Where("is_active = ?", true).Find(&categories).Error; err != nil { return err }
-	if len(categories) == 0 { return httpx.NotFound("Categories Recommendations") }
+	if err := s.db.WithContext(c.Context()).Where("is_active = ?", true).Find(&categories).Error; err != nil {
+		return err
+	}
+	if len(categories) == 0 {
+		return httpx.NotFound("Categories Recommendations")
+	}
 	data := make([]fiber.Map, 0, len(categories))
 	for _, category := range categories {
 		// In the source each category includes only the most sold active product.
@@ -137,10 +181,16 @@ func (s *Service) categories(c fiber.Ctx) error {
 			Select("products.*").Joins("LEFT JOIN order_items oi ON oi.product_id = products.id").
 			Where("products.category_id = ? AND products.is_active = ?", category.ID.ID, true).
 			Group("products.id").Order("COUNT(oi.id) DESC").Limit(1).Find(&product)
-		if result.Error != nil { return result.Error }
-		if result.RowsAffected == 0 { continue }
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			continue
+		}
 		image := ""
-		if product.ImageURL != nil { image = *product.ImageURL }
+		if product.ImageURL != nil {
+			image = *product.ImageURL
+		}
 		data = append(data, fiber.Map{"id": product.ID.ID, "imageUrl": image, "category": category.Name, "categoryId": category.ID.ID})
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Categories Recommendations"), Data: data})
@@ -151,23 +201,38 @@ func (s *Service) offers(c fiber.Ctx) error {
 	err := s.db.WithContext(c.Context()).Model(&domain.Product{}).
 		Joins("JOIN product_discounts pd ON pd.product_id = products.id").
 		Where("products.is_active = ? AND pd.is_active = ?", true, true).Limit(5).Find(&products).Error
-	if err != nil { return err }
-	if len(products) == 0 { return httpx.NotFound("Offer Recommendations") }
+	if err != nil {
+		return err
+	}
+	if len(products) == 0 {
+		return httpx.NotFound("Offer Recommendations")
+	}
 	rows, err := s.decorate(c, products)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	// Preserve the original offers comparator: percentage sorting divides
 	// discount value by 100 (not by product price), before rating and sales.
 	value := func(p recommendation) float64 {
-		if p.Discount == nil || p.Discount.Value == nil { return 0 }
+		if p.Discount == nil || p.Discount.Value == nil {
+			return 0
+		}
 		switch p.Discount.Type {
-		case "FIXED": return *p.Discount.Value
-		case "PERCENTAGE": return *p.Discount.Value / 100
-		default: return 0
+		case "FIXED":
+			return *p.Discount.Value
+		case "PERCENTAGE":
+			return *p.Discount.Value / 100
+		default:
+			return 0
 		}
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
-		if value(rows[i]) != value(rows[j]) { return value(rows[i]) > value(rows[j]) }
-		if rows[i].Rate != rows[j].Rate { return rows[i].Rate > rows[j].Rate }
+		if value(rows[i]) != value(rows[j]) {
+			return value(rows[i]) > value(rows[j])
+		}
+		if rows[i].Rate != rows[j].Rate {
+			return rows[i].Rate > rows[j].Rate
+		}
 		return rows[i].Sales > rows[j].Sales
 	})
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Offer Recommendations"), Data: productViews(rows)})
@@ -175,29 +240,47 @@ func (s *Service) offers(c fiber.Ctx) error {
 
 func (s *Service) related(c fiber.Ctx) error {
 	id := c.Params("id")
-	if err := httpx.UUID(id); err != nil { return err }
+	if err := httpx.UUID(id); err != nil {
+		return err
+	}
 	var product domain.Product
 	if err := s.db.WithContext(c.Context()).First(&product, "id = ?", id).Error; err != nil {
-		if err == gorm.ErrRecordNotFound { return httpx.NotFound("Related Recommendations") }
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Related Recommendations")
+		}
 		return err
 	}
 	var products []domain.Product
 	err := s.db.WithContext(c.Context()).Where("is_active = ? AND id <> ? AND category_id = ?", true, id, product.CategoryID).Find(&products).Error
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	rows, err := s.decorate(c, products)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	rankByRatingAndSales(rows)
 	if len(rows) < 5 {
 		exclude := []string{id}
-		for _, p := range rows { exclude = append(exclude, p.Product.ID.ID) }
+		for _, p := range rows {
+			exclude = append(exclude, p.Product.ID.ID)
+		}
 		var additional []domain.Product
-		if err := s.db.WithContext(c.Context()).Where("is_active = ? AND id NOT IN ?", true, exclude).Find(&additional).Error; err != nil { return err }
+		if err := s.db.WithContext(c.Context()).Where("is_active = ? AND id NOT IN ?", true, exclude).Find(&additional).Error; err != nil {
+			return err
+		}
 		more, err := s.decorate(c, additional)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		rows = append(rows, more...)
 		rankByRatingAndSales(rows)
 	}
-	if len(rows) == 0 { return httpx.NotFound("Related Recommendations") }
-	if len(rows) > 5 { rows = rows[:5] }
+	if len(rows) == 0 {
+		return httpx.NotFound("Related Recommendations")
+	}
+	if len(rows) > 5 {
+		rows = rows[:5]
+	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Related Recommendations"), Data: productViews(rows)})
 }
