@@ -46,6 +46,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 	}
 	var m domain.Inventory
 	if err := s.db.First(&m, "id = ?", c.Params("id")).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Inventory")
+		}
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Inventory"), Data: m})
@@ -56,6 +59,9 @@ func (s *Service) byProduct(c fiber.Ctx) error {
 	}
 	var m domain.Inventory
 	if err := s.db.First(&m, "product_id = ?", c.Params("id")).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Inventory")
+		}
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Inventory"), Data: m})

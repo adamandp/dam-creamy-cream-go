@@ -122,6 +122,9 @@ func (s *Service) findOne(c fiber.Ctx) error {
 	}
 	var m domain.Category
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("category")
+		}
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "category"), Data: m})

@@ -46,12 +46,18 @@ def request(port, path, actor=None):
     req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
-            return response.status, json.loads(response.read())
+            raw = response.read()
+            try:
+                return response.status, json.loads(raw)
+            except ValueError:
+                # NestJS payment scaffold returns literal strings, not JSON.
+                return response.status, raw.decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
+        raw = exc.read()
         try:
-            return exc.code, json.loads(exc.read())
+            return exc.code, json.loads(raw)
         except ValueError:
-            return exc.code, None
+            return exc.code, raw.decode("utf-8", errors="replace")
 
 
 cases = [

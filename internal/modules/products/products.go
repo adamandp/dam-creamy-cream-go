@@ -423,12 +423,10 @@ func (s *Service) catalog(c fiber.Ctx) error {
 	}
 	db := s.db.Model(&domain.Product{}).Where("is_active = ?", true)
 	if q != "" {
-		// Prisma contains treats %, _ and \ as literal search text. SQL
-		// ILIKE treats the first two as wildcards; escaping them also prevents
-		// user searches from unexpectedly matching the entire catalog.
-		escaped := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(q)
-		needle := "%" + escaped + "%"
-		db = db.Where("(name ILIKE ? ESCAPE '!' OR description ILIKE ? ESCAPE '!')", needle, needle)
+		// Prisma's PostgreSQL `contains` compiles to ILIKE with the same
+		// LIKE metacharacter behavior. Preserve it for 1:1 source parity.
+		needle := "%" + q + "%"
+		db = db.Where("(name ILIKE ? OR description ILIKE ?)", needle, needle)
 	}
 	if len(categoryIDs) > 0 {
 		db = db.Where("category_id IN ?", categoryIDs)
@@ -478,6 +476,9 @@ func (s *Service) detail(c fiber.Ctx) error {
 	}
 	var m domain.Product
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Product")
+		}
 		return err
 	}
 	ratings, err := s.ratings([]string{id})
@@ -506,6 +507,9 @@ func (s *Service) information(c fiber.Ctx) error {
 	}
 	var info domain.ProductInformation
 	if err := s.db.Where("product_id = ?", id).First(&info).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Product Information")
+		}
 		return err
 	}
 	var m domain.Product

@@ -74,6 +74,9 @@ func (s *Service) findByID(c fiber.Ctx) error {
 	var shipment domain.Shipment
 	db := s.db.WithContext(c.Context())
 	if err := db.First(&shipment, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Shipment")
+		}
 		return err
 	}
 	if !actor.Admin {
