@@ -124,9 +124,22 @@ The original NestJS routes are now registered in the stacked Go branch:
 | Notifications | `POST /notifications`, `GET /notifications`, `GET /notifications/:id`, `PATCH /notifications/:id`, `DELETE /notifications/:id` |
 | User Notifications | `POST /user-notifications`, `GET /user-notifications`, `GET /user-notifications/:id`, `GET /user-notifications/me`, `GET /user-notifications/count/me`, `GET /user-notifications/notification/:id`, `GET /user-notifications/notification/:id/count`, `PATCH /user-notifications/:id` |
 
-`GET /reviews/me`, `GET /product-analytics/user`, `GET /user-notifications/me`
-and `GET /user-notifications/count/me` require the verified Go bearer token.
-The other routes retain NestJS's public route surface. The original DTO
-validation, pagination and several unusual source-specific database queries
-are intentionally retained; see `parity.md`. An absent collection returns 404
-on the corresponding paginated list, matching the original service.
+The public read surfaces remain available for Reviews, Recommendations,
+Product Analytics by product, and Notification definitions. The correctness
+follow-up introduces these explicit verified-bearer authorization rules:
+
+- Reviews: authenticated users may create their own review; editing/deleting
+  requires its owner or an admin. `GET /reviews/me` requires an actor.
+- Product Analytics: creation requires an actor, and the submitted `userId`
+  must match the actor unless admin. `userId` and `productId` must be real UUIDs,
+  not null/missing. `GET /product-analytics/user` requires an actor.
+- Notification definitions: mutations are admin-only, reads remain public.
+  Titles are capped at 50 characters to match PostgreSQL `VARCHAR(50)`.
+- User Notifications: creating and global/notification-wide listing/counts are
+  admin-only; reading an individual record or marking it read requires its
+  owner or an admin. The `me` feed/count require an actor.
+
+Review and Product Analytics pagination totals now count the filtered rows;
+notification-wide filters use `notification_id`, not the original incorrect
+`user_id` predicate. See `parity.md` for the intentionally changed NestJS
+behavior. An absent collection returns 404 on the corresponding paginated list.
