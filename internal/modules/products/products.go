@@ -366,16 +366,32 @@ func (s *Service) catalog(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	// ProductQuerySchema is strict in NestJS. Track presence separately from
+	// value: z.coerce.number("") is 0, whereas an absent bound is omitted.
+	allowed := map[string]bool{"page": true, "limit": true, "q": true, "sort": true, "cat": true, "min": true, "max": true}
+	present := map[string]bool{}
+	var unexpected []string
+	c.Request().URI().QueryArgs().VisitAll(func(k, _ []byte) {
+		key := string(k)
+		present[key] = true
+		if !allowed[key] {
+			unexpected = append(unexpected, key)
+		}
+	})
+	if len(unexpected) > 0 {
+		return fiber.NewError(400, "Unrecognized catalog query parameter")
+	}
 	q := c.Query("q")
 	sort := c.Query("sort")
 	cat := c.Query("cat")
-	if q != "" {
-		if err := httpx.NonBlank(q, 1, 100, "q"); err != nil {
-			return err
-		}
+	if present["q"] && (httpx.JSStringLength(q) < 1 || httpx.JSStringLength(q) > 100) {
+		return fiber.NewError(400, "q must be 1-100 characters")
 	}
-	if sort != "" && sort != "asc" && sort != "desc" && sort != "default" {
+	if present["sort"] && sort != "asc" && sort != "desc" && sort != "default" {
 		return fiber.NewError(400, "sort must be asc, desc or default")
+	}
+	if present["cat"] && (httpx.JSStringLength(cat) < 1 || httpx.JSStringLength(cat) > 100) {
+		return fiber.NewError(400, "cat must be 1-100 characters")
 	}
 	var categoryIDs []string
 	if cat != "" {
@@ -392,11 +408,14 @@ func (s *Service) catalog(c fiber.Ctx) error {
 	}
 	var bounds []priceBound
 	for _, cond := range []struct{ key, cmp string }{{"min", ">="}, {"max", "<="}} {
-		raw := c.Query(cond.key)
-		if raw == "" {
+		if !present[cond.key] {
 			continue
 		}
+		raw := c.Query(cond.key)
 		n, err := strconv.ParseFloat(raw, 64)
+		if raw == "" {
+			n, err = 0, nil
+		}
 		if err != nil || math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || n > 1000000 {
 			return fiber.NewError(400, fmt.Sprintf("%s must be within 0..1000000", cond.key))
 		}

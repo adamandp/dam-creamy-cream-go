@@ -32,10 +32,14 @@ func TestRemainingFiveNestModulesContracts(t *testing.T) {
 	}
 	role := domain.Role{Name: "Customer"}
 	create(&role)
+	adminRole := domain.Role{Name: "Admin"}
+	create(&adminRole)
 	owner := domain.User{RoleID: role.ID.ID, Username: "RemainingOwner", FullName: "Remaining Owner", Password: "fixture", IsActive: true}
 	other := domain.User{RoleID: role.ID.ID, Username: "RemainingOther", FullName: "Remaining Other", Password: "fixture", IsActive: true}
+	admin := domain.User{RoleID: adminRole.ID.ID, Username: "RemainingAdmin", FullName: "Remaining Admin", Password: "fixture", IsActive: true}
 	create(&owner)
 	create(&other)
+	create(&admin)
 	classic := domain.Category{Name: "Classic Collection", IsActive: true}
 	otherCategory := domain.Category{Name: "Special Collection", IsActive: true}
 	create(&classic)
@@ -51,18 +55,28 @@ func TestRemainingFiveNestModulesContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	adminTokens, err := ses.NewTokens(context.Background(), admin.ID.ID, admin.RoleID, "", "Integration", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTokens, err := ses.NewTokens(context.Background(), other.ID.ID, other.RoleID, "", "Integration", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
 	reviews.NewService(tx, ses).Routes(app)
 	recommendations.NewService(tx).Routes(app)
 	productanalytics.NewService(tx, ses).Routes(app)
-	notifications.NewService(tx).Routes(app)
+	notifications.NewService(tx, ses).Routes(app)
 	usernotifications.NewService(tx, ses).Routes(app)
 
-	// Reviews preserve source response mappings and global paging totals.
+	// Reviews preserve their wire projections, but enforce ownership and scoped totals.
 	testBody(t, testCall(t, app, "GET", "/reviews", "", "", 404))
 	validReview := fmt.Sprintf(`{"userId":%q,"productId":%q,"rating":5,"comment":"Excellent!"}`, owner.ID.ID, vanilla.ID.ID)
-	testBody(t, testCall(t, app, "POST", "/reviews", validReview, "", 201))
-	testBody(t, testCall(t, app, "POST", "/reviews", `{"rating":6}`, "", 400))
+	testBody(t, testCall(t, app, "POST", "/reviews", validReview, "", 401))
+	testBody(t, testCallAs(t, app, otherTokens.AccessToken, "POST", "/reviews", validReview, "", 403))
+	testBody(t, testCallAs(t, app, tokens.AccessToken, "POST", "/reviews", validReview, "", 201))
+	testBody(t, testCallAs(t, app, tokens.AccessToken, "POST", "/reviews", `{"rating":6}`, "", 400))
 	var review domain.Review
 	if err := tx.First(&review, "product_id = ?", vanilla.ID.ID).Error; err != nil {
 		t.Fatal(err)
@@ -73,8 +87,8 @@ func TestRemainingFiveNestModulesContracts(t *testing.T) {
 		t.Fatalf("reviews list: %+v", listReviews)
 	}
 	productReviews := testBody(t, testCall(t, app, "GET", "/reviews/product/"+vanilla.ID.ID, "", "", 200))
-	if productReviews["paging"].(map[string]any)["totalItems"] != float64(2) {
-		t.Fatalf("legacy global review count changed: %v", productReviews)
+	if productReviews["paging"].(map[string]any)["totalItems"] != float64(1) {
+		t.Fatalf("product review paging must be scoped: %v", productReviews)
 	}
 	perProduct := requiredRows(t, productReviews)
 	if len(perProduct) != 1 || perProduct[0].(map[string]any)["rate"] != float64(5) || perProduct[0].(map[string]any)["name"] != owner.Username {
@@ -83,11 +97,13 @@ func TestRemainingFiveNestModulesContracts(t *testing.T) {
 	testBody(t, testCall(t, app, "GET", "/reviews/"+review.ID.ID, "", "", 200))
 	testBody(t, testCall(t, app, "GET", "/reviews/me", "", "", 401))
 	mine := testBody(t, testCallAs(t, app, tokens.AccessToken, "GET", "/reviews/me", "", "", 200))
-	if len(requiredRows(t, mine)) != 1 || mine["paging"].(map[string]any)["totalItems"] != float64(2) {
-		t.Fatalf("reviews/me source paging changed: %v", mine)
+	if len(requiredRows(t, mine)) != 1 || mine["paging"].(map[string]any)["totalItems"] != float64(1) {
+		t.Fatalf("reviews/me paging must be scoped: %v", mine)
 	}
-	testBody(t, testCall(t, app, "PATCH", "/reviews/"+review.ID.ID, `{"rating":5}`, "", 400))
-	testBody(t, testCall(t, app, "PATCH", "/reviews/"+review.ID.ID, `{"rating":3}`, "", 200))
+	testBody(t, testCall(t, app, "PATCH", "/reviews/"+review.ID.ID, `{"rating":3}`, "", 401))
+	testBody(t, testCallAs(t, app, otherTokens.AccessToken, "PATCH", "/reviews/"+review.ID.ID, `{"rating":3}`, "", 403))
+	testBody(t, testCallAs(t, app, tokens.AccessToken, "PATCH", "/reviews/"+review.ID.ID, `{"rating":5}`, "", 400))
+	testBody(t, testCallAs(t, app, tokens.AccessToken, "PATCH", "/reviews/"+review.ID.ID, `{"rating":3}`, "", 200))
 
 	// Recommendations include active-discount relation, rate and sales ranks.
 	discountValue := 25.0
@@ -121,12 +137,15 @@ func TestRemainingFiveNestModulesContracts(t *testing.T) {
 	}
 	testBody(t, testCall(t, app, "GET", "/recommendations/related/00000000-0000-4000-8000-000000000010", "", "", 404))
 
-	// Product Analytics: scoped rows with legacy GLOBAL pagination totals.
+	// Product Analytics: validated actor and counts scoped to returned rows.
 	analyticsBody := fmt.Sprintf(`{"userId":%q,"productId":%q}`, owner.ID.ID, vanilla.ID.ID)
-	testBody(t, testCall(t, app, "POST", "/product-analytics", analyticsBody, "", 201))
+	testBody(t, testCall(t, app, "POST", "/product-analytics", analyticsBody, "", 401))
+	testBody(t, testCallAs(t, app, otherTokens.AccessToken, "POST", "/product-analytics", analyticsBody, "", 403))
+	testBody(t, testCallAs(t, app, tokens.AccessToken, "POST", "/product-analytics", `{"userId":null,"productId":null}`, "", 400))
+	testBody(t, testCallAs(t, app, tokens.AccessToken, "POST", "/product-analytics", analyticsBody, "", 201))
 	create(&domain.ProductAnalytics{UserID: other.ID.ID, ProductID: chocolate.ID.ID})
 	analytics := testBody(t, testCall(t, app, "GET", "/product-analytics/product/"+vanilla.ID.ID, "", "", 200))
-	if len(requiredRows(t, analytics)) != 1 || analytics["paging"].(map[string]any)["totalItems"] != float64(2) {
+	if len(requiredRows(t, analytics)) != 1 || analytics["paging"].(map[string]any)["totalItems"] != float64(1) {
 		t.Fatalf("analytics count mismatch: %v", analytics)
 	}
 	if count := requiredData(t, testBody(t, testCall(t, app, "GET", "/product-analytics/product/"+vanilla.ID.ID+"/count", "", "", 200)))["count"]; count != float64(1) {
@@ -139,7 +158,10 @@ func TestRemainingFiveNestModulesContracts(t *testing.T) {
 
 	// Notifications and User Notifications: nested notification JSON and read state.
 	testBody(t, testCall(t, app, "GET", "/notifications", "", "", 404))
-	testBody(t, testCall(t, app, "POST", "/notifications", `{"title":"Delivery","message":"Your order is ready"}`, "", 201))
+	testBody(t, testCall(t, app, "POST", "/notifications", `{"title":"Delivery","message":"Your order is ready"}`, "", 401))
+	testBody(t, testCallAs(t, app, tokens.AccessToken, "POST", "/notifications", `{"title":"Delivery","message":"Your order is ready"}`, "", 403))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/notifications", fmt.Sprintf(`{"title":%q,"message":"Too long"}`, strings.Repeat("A", 51)), "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/notifications", `{"title":"Delivery","message":"Your order is ready"}`, "", 201))
 	var n domain.Notification
 	if err := tx.First(&n, "title = ?", "Delivery").Error; err != nil {
 		t.Fatal(err)
@@ -149,19 +171,22 @@ func TestRemainingFiveNestModulesContracts(t *testing.T) {
 	if !strings.HasSuffix(got["createdAt"].(string), "Z") {
 		t.Fatalf("notification time: %+v", got)
 	}
-	testBody(t, testCall(t, app, "PATCH", "/notifications/"+n.ID.ID, `{"title":"Delivery"}`, "", 400))
-	testBody(t, testCall(t, app, "PATCH", "/notifications/"+n.ID.ID, `{"message":"Shipped"}`, "", 200))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/notifications/"+n.ID.ID, `{"title":"Delivery"}`, "", 400))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "PATCH", "/notifications/"+n.ID.ID, `{"message":"Shipped"}`, "", 200))
 	userNotificationBody := fmt.Sprintf(`{"userId":%q,"notificationId":%q,"isRead":false}`, owner.ID.ID, n.ID.ID)
-	testBody(t, testCall(t, app, "POST", "/user-notifications", userNotificationBody, "", 201))
+	testBody(t, testCall(t, app, "POST", "/user-notifications", userNotificationBody, "", 401))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "POST", "/user-notifications", userNotificationBody, "", 201))
 	var un domain.UserNotification
 	if err := tx.First(&un, "user_id = ?", owner.ID.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	userFeed := requiredRows(t, testBody(t, testCall(t, app, "GET", "/user-notifications", "", "", 200)))
+	testBody(t, testCall(t, app, "GET", "/user-notifications", "", "", 401))
+	userFeed := requiredRows(t, testBody(t, testCallAs(t, app, adminTokens.AccessToken, "GET", "/user-notifications", "", "", 200)))
 	if len(userFeed) != 1 || userFeed[0].(map[string]any)["notifications"].(map[string]any)["message"] != "Shipped" {
 		t.Fatalf("nested notification contract: %+v", userFeed)
 	}
-	testBody(t, testCall(t, app, "GET", "/user-notifications/"+un.ID.ID, "", "", 200))
+	testBody(t, testCallAs(t, app, otherTokens.AccessToken, "GET", "/user-notifications/"+un.ID.ID, "", "", 403))
+	testBody(t, testCallAs(t, app, tokens.AccessToken, "GET", "/user-notifications/"+un.ID.ID, "", "", 200))
 	testBody(t, testCall(t, app, "GET", "/user-notifications/me", "", "", 401))
 	if rows := requiredRows(t, testBody(t, testCallAs(t, app, tokens.AccessToken, "GET", "/user-notifications/me", "", "", 200))); len(rows) != 1 {
 		t.Fatalf("user notification feed: %+v", rows)
@@ -170,21 +195,23 @@ func TestRemainingFiveNestModulesContracts(t *testing.T) {
 	if count["count"] != float64(1) {
 		t.Fatalf("notification count: %v", count)
 	}
-	// Source's notification/:id query checks user_id rather than notification_id.
-	oddCount := requiredData(t, testBody(t, testCall(t, app, "GET", "/user-notifications/notification/"+n.ID.ID+"/count", "", "", 200)))
-	if oddCount["count"] != float64(0) {
-		t.Fatalf("legacy wrong-column count changed: %v", oddCount)
+	correctCount := requiredData(t, testBody(t, testCallAs(t, app, adminTokens.AccessToken, "GET", "/user-notifications/notification/"+n.ID.ID+"/count", "", "", 200)))
+	if correctCount["count"] != float64(1) {
+		t.Fatalf("notification ID filter must count associations: %v", correctCount)
 	}
-	testBody(t, testCall(t, app, "GET", "/user-notifications/notification/"+n.ID.ID, "", "", 404))
-	testBody(t, testCall(t, app, "PATCH", "/user-notifications/"+un.ID.ID, `{}`, "", 200))
+	if len(requiredRows(t, testBody(t, testCallAs(t, app, adminTokens.AccessToken, "GET", "/user-notifications/notification/"+n.ID.ID, "", "", 200)))) != 1 {
+		t.Fatal("notification ID list must contain its associated user notification")
+	}
+	testBody(t, testCallAs(t, app, otherTokens.AccessToken, "PATCH", "/user-notifications/"+un.ID.ID, `{}`, "", 403))
+	testBody(t, testCallAs(t, app, tokens.AccessToken, "PATCH", "/user-notifications/"+un.ID.ID, `{}`, "", 200))
 	if err := tx.First(&un, "id = ?", un.ID.ID).Error; err != nil || !un.IsRead {
 		t.Fatalf("notification read state: %v %+v", err, un)
 	}
 	if again := requiredData(t, testBody(t, testCallAs(t, app, tokens.AccessToken, "GET", "/user-notifications/count/me", "", "", 200))); again["count"] != float64(1) {
 		t.Fatalf("source counts read notifications too: %v", again)
 	}
-	testBody(t, testCall(t, app, "DELETE", "/reviews/"+review.ID.ID, "", "", 200))
+	testBody(t, testCallAs(t, app, tokens.AccessToken, "DELETE", "/reviews/"+review.ID.ID, "", "", 200))
 	// The FK violation aborts this fixture transaction. Keep it as the last
 	// assertion, then let the deferred rollback cleanly discard the fixture.
-	testBody(t, testCall(t, app, "DELETE", "/notifications/"+n.ID.ID, "", "", 409))
+	testBody(t, testCallAs(t, app, adminTokens.AccessToken, "DELETE", "/notifications/"+n.ID.ID, "", "", 409))
 }

@@ -19,6 +19,8 @@ GO = int(os.getenv("GO_PORT", "4082"))
 CUSTOMER = "22222222-2222-4222-8222-222222222222"
 OTHER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 ROLE = "11111111-1111-4111-8111-111111111111"
+ADMIN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+ADMIN_ROLE = "99999999-9999-4999-8999-999999999999"
 PRODUCT = "44444444-4444-4444-8444-444444444444"
 CLASSIC = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 REVIEW = "e1111111-1111-4111-8111-111111111111"
@@ -27,7 +29,7 @@ DELETE_NOTIFICATION = "e6666666-6666-4666-8666-666666666666"
 USER_NOTIFICATION = "e7777777-7777-4777-8777-777777777777"
 
 
-def access_token():
+def access_token(subject, role):
     def b64(value):
         return base64.urlsafe_b64encode(
             json.dumps(value, separators=(",", ":")).encode()
@@ -35,7 +37,7 @@ def access_token():
 
     head = b64({"alg": "HS256", "typ": "JWT"})
     now = int(time.time())
-    payload = b64({"sub": CUSTOMER, "role": ROLE, "iat": now, "exp": now + 900})
+    payload = b64({"sub": subject, "role": role, "iat": now, "exp": now + 900})
     signed = f"{head}.{payload}".encode()
     signature = base64.urlsafe_b64encode(
         hmac.new(b"compare-access-secret", signed, hashlib.sha256).digest()
@@ -43,14 +45,14 @@ def access_token():
     return f"{head}.{payload}.{signature}"
 
 
-TOKEN = access_token()
+TOKENS = {"customer": access_token(CUSTOMER, ROLE), "admin": access_token(ADMIN, ADMIN_ROLE)}
 
 
-def request(port, method, path, payload=None, authorized=True):
+def request(port, method, path, payload=None, actor="customer"):
     body = json.dumps(payload).encode() if payload is not None else None
     headers = {"Content-Type": "application/json"}
-    if authorized:
-        headers["Authorization"] = "Bearer " + TOKEN
+    if actor is not None:
+        headers["Authorization"] = "Bearer " + TOKENS[actor]
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}", data=body, method=method, headers=headers
     )
@@ -71,11 +73,11 @@ failed = 0
 tested = 0
 
 
-def verify(label, method, path, payload=None, authorized=True, approved_difference=None):
+def verify(label, method, path, payload=None, actor="customer", approved_difference=None):
     global match, approved, failed, tested
     tested += 1
-    nest = request(NEST, method, path, payload, authorized)
-    go = request(GO, method, path, payload, authorized)
+    nest = request(NEST, method, path, payload, actor)
+    go = request(GO, method, path, payload, actor)
     if nest == go:
         match += 1
         print(f"MATCH {label}: {nest[0]}", flush=True)
@@ -97,6 +99,23 @@ def verify(label, method, path, payload=None, authorized=True, approved_differen
                    and isinstance(go[1], dict)
                    and {k: v for k, v in go[1].items() if k != "error"} == nest[1]
                    and go[1].get("error") == "Not Found")
+    elif approved_difference == "scoped_count":
+        allowed = (nest[0] == go[0] == 200 and isinstance(nest[1], dict)
+                   and isinstance(go[1], dict)
+                   and nest[1].get("message") == go[1].get("message")
+                   and nest[1].get("data") == go[1].get("data")
+                   and nest[1]["paging"]["totalItems"] == 2
+                   and go[1]["paging"]["totalItems"] == 1
+                   and {k: v for k, v in nest[1]["paging"].items() if k != "totalItems"}
+                   == {k: v for k, v in go[1]["paging"].items() if k != "totalItems"})
+    elif approved_difference == "notification_filter":
+        allowed = (nest[0] == 404 and go[0] == 200 and isinstance(go[1], dict)
+                   and len(go[1].get("data", [])) == 1
+                   and go[1]["data"][0]["notificationId"] == NOTIFICATION)
+    elif approved_difference == "notification_filter_count":
+        allowed = (nest[0] == go[0] == 200
+                   and nest[1].get("data", {}).get("count") == 0
+                   and go[1].get("data", {}).get("count") == 1)
     if allowed:
         approved += 1
         print(f"APPROVED {approved_difference} {label}: Nest={nest[0]} Go={go[0]}", flush=True)
@@ -110,15 +129,15 @@ def verify(label, method, path, payload=None, authorized=True, approved_differen
 # All read contracts before any writes, on identical seeded databases.
 for path, difference in [
     ("/reviews", "missing_query"),
-    ("/reviews/product/" + PRODUCT, None),
+    ("/reviews/product/" + PRODUCT, "scoped_count"),
     ("/reviews/" + REVIEW, None),
     ("/reviews/me", "review_me_shadow"),
     ("/recommendations/classic", None),
     ("/recommendations/categories", None),
     ("/recommendations/offers", None),
     ("/recommendations/related/" + PRODUCT, None),
-    ("/product-analytics/product/" + PRODUCT, None),
-    ("/product-analytics/user", None),
+    ("/product-analytics/product/" + PRODUCT, "scoped_count"),
+    ("/product-analytics/user", "scoped_count"),
     ("/product-analytics/product/" + PRODUCT + "/count", None),
     ("/notifications", None),
     ("/notifications/" + NOTIFICATION, None),
@@ -126,10 +145,11 @@ for path, difference in [
     ("/user-notifications/" + USER_NOTIFICATION, None),
     ("/user-notifications/me", "user_notification_me_shadow"),
     ("/user-notifications/count/me", None),
-    ("/user-notifications/notification/" + NOTIFICATION, "go_error_envelope"),
-    ("/user-notifications/notification/" + NOTIFICATION + "/count", None),
+    ("/user-notifications/notification/" + NOTIFICATION, "notification_filter"),
+    ("/user-notifications/notification/" + NOTIFICATION + "/count", "notification_filter_count"),
 ]:
-    verify("GET " + path, "GET", path, approved_difference=difference)
+    actor = "admin" if path == "/user-notifications" or path.startswith("/user-notifications/notification/") else "customer"
+    verify("GET " + path, "GET", path, actor=actor, approved_difference=difference)
 
 
 # Mutation contracts use stable seeded rows. New IDs are not compared after
@@ -145,7 +165,8 @@ for method, path, payload in [
     ("POST", "/notifications", {"title": "Update", "message": "Fresh batch available"}),
     ("POST", "/user-notifications", {"userId": OTHER, "notificationId": NOTIFICATION, "isRead": False}),
 ]:
-    verify(method + " " + path, method, path, payload)
+    actor = "admin" if path.startswith("/notifications") or path == "/user-notifications" else "customer"
+    verify(method + " " + path, method, path, payload, actor=actor)
 
 
 print(f"ROUTES={tested}; MATCH={match}; APPROVED_CHANGES={approved}; UNEXPECTED={failed}")

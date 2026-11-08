@@ -25,14 +25,14 @@ var createFields = []promotionutil.Field{
 
 func (s *Service) Routes(app fiber.Router) {
 	r := app.Group("/user-notifications")
-	r.Post("/", s.create)
-	r.Get("/", s.findAll)
+	r.Post("/", s.sessions.RequireAdmin, s.create)
+	r.Get("/", s.sessions.RequireAdmin, s.findAll)
 	r.Get("/me", s.sessions.RequireActor, s.byUser)
 	r.Get("/count/me", s.sessions.RequireActor, s.userCount)
-	r.Get("/notification/:id/count", s.notificationCount)
-	r.Get("/notification/:id", s.byNotification)
-	r.Get("/:id", s.byID)
-	r.Patch("/:id", s.updateRead)
+	r.Get("/notification/:id/count", s.sessions.RequireAdmin, s.notificationCount)
+	r.Get("/notification/:id", s.sessions.RequireAdmin, s.byNotification)
+	r.Get("/:id", s.sessions.RequireActor, s.byID)
+	r.Patch("/:id", s.sessions.RequireActor, s.updateRead)
 }
 
 func (s *Service) create(c fiber.Ctx) error {
@@ -123,6 +123,10 @@ func (s *Service) list(c fiber.Ctx, filter string, argument any, scopedCount boo
 func (s *Service) findAll(c fiber.Ctx) error { return s.list(c, "", nil, false) }
 
 func (s *Service) byID(c fiber.Ctx) error {
+	actor, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
 		return err
@@ -130,6 +134,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 	var row domain.UserNotification
 	if err := s.db.WithContext(c.Context()).First(&row, "id = ?", id).Error; err != nil {
 		return err
+	}
+	if !actor.Admin && actor.UserID != row.UserID {
+		return httpx.Forbidden()
 	}
 	views, err := s.withNotifications(c, []domain.UserNotification{row})
 	if err != nil {
@@ -176,9 +183,7 @@ func (s *Service) byNotification(c fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	// The NestJS implementation filters userId by notificationId. Preserve
-	// that legacy query as requested; do not silently fix the source defect.
-	return s.list(c, "user_id = ?", id, true)
+	return s.list(c, "notification_id = ?", id, true)
 }
 
 func (s *Service) notificationCount(c fiber.Ctx) error {
@@ -187,16 +192,23 @@ func (s *Service) notificationCount(c fiber.Ctx) error {
 		return err
 	}
 	var total int64
-	if err := s.db.WithContext(c.Context()).Model(&domain.UserNotification{}).Where("user_id = ?", id).Count(&total).Error; err != nil {
+	if err := s.db.WithContext(c.Context()).Model(&domain.UserNotification{}).Where("notification_id = ?", id).Count(&total).Error; err != nil {
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "User Notification"), Data: fiber.Map{"count": total}})
 }
 
 func (s *Service) updateRead(c fiber.Ctx) error {
+	actor, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
 	var row domain.UserNotification
 	if err := s.db.WithContext(c.Context()).First(&row, "id = ?", c.Params("id")).Error; err != nil {
 		return err
+	}
+	if !actor.Admin && actor.UserID != row.UserID {
+		return httpx.Forbidden()
 	}
 	if err := s.db.WithContext(c.Context()).Model(&row).Update("is_read", true).Error; err != nil {
 		return err

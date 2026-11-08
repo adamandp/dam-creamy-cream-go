@@ -61,6 +61,21 @@ func TestCatalogAndProductInformationOnPrismaSchema(t *testing.T) {
 	if !ok || p["discountPrice"] != 9600.0 || p["discountType"] != "PERCENTAGE" || p["discountValue"] != 20.0 {
 		t.Errorf("catalog discount mapping mismatch: %v", p)
 	}
+	// ProductQuerySchema is strict and Zod distinguishes missing from empty.
+	for _, tc := range []struct {
+		query  string
+		status int
+	}{
+		{"q=%20", 200}, // whitespace is a valid one-character Zod string
+		{"min=", 200}, // z.coerce.number("") == 0
+		{"max=", 404}, // a supplied zero max excludes this positive-price product
+		{"q=", 400},
+		{"sort=", 400},
+		{"cat=", 400},
+		{"unknown=ignored-in-first-pass", 400},
+	} {
+		testBody(t, testCall(t, app, "GET", "/products/catalog?"+tc.query, "", "", tc.status))
+	}
 	productID := product.ID.ID
 	detail := testBody(t, testCall(t, app, "GET", "/product/"+productID, "", "", 200))
 	d, ok := detail["data"].(map[string]any)

@@ -58,47 +58,63 @@ Reviews (7), Recommendations (4), Product Analytics (4), Notifications (5),
 and User Notifications (8). Each module ports the existing service's query,
 response and mutation semantics; this **does not certify whole-app 1:1 parity**.
 
-The source has behaviors that appear defective but were deliberately retained
-for the requested source-first rewrite:
+The initial PR #5 port retained the following source defects. The subsequent
+PR #5 correctness/security pass fixes the marked issues without changing the
+PostgreSQL schema; the NestJS-vs-Go comparator explicitly approves these
+additional deviations:
 
 - `ReviewsService.findByUser` and `.findByProduct` use a **global** Review count
-  in pagination, even though rows are scoped.
+  in pagination, even though rows are scoped. **Fixed in Go:** scoped counts.
 - `ReviewsController.findAll` never injects `@Query()`, so the NestJS route
   crashes with 500; Go intentionally exposes the underlying working service
   list and returns 200. `GET /reviews/me` and `GET /user-notifications/me`
   are shadowed by their preceding `/:id` route in Nest; Go registers the
   intended static routes first. These are explicit HTTP behavior deviations.
-- Product Analytics pages also use a **global** count.
+- Product Analytics pages also use a **global** count. **Fixed in Go:** scoped counts.
 - `UserNotificationsService.findByNotification` and `.findByNotificationCount`
   filter `user_id` with the **notification ID**, not `notification_id`.
+  **Fixed in Go:** filter on `notification_id`.
 - User notification count includes read records; it is not an unread count.
 - Recommendations deliberately use their own historical discount computation
   rather than the corrected Catalog/Checkout shared price calculation. The
   offers percentage-ranking expression uses `discount.value / 100`, and the
   source takes its first five offers **before** sorting them.
-- Nullable Product Analytics IDs still use the source's misspelled `unkown`
-  fallback, which is invalid for the UUID database columns. No schema change
-  or silent rewrite was introduced.
+- Nullable Product Analytics IDs in the source use the misspelled `unkown`
+  fallback, which is invalid for the UUID database columns. **Fixed in Go:**
+  reject null/missing IDs with a client error before database persistence.
 - Nest's Notification Zod title length allows 100 characters although the
-  underlying Prisma VARCHAR(50) column is narrower.
+  underlying Prisma VARCHAR(50) column is narrower. **Fixed in Go:** limit 50.
 - The existing Go shared error handler adds `error: "Not Found"` to an HTTP
   404, while the NestJS custom exception returns only statusCode/message.
   Do not change the earlier Go modules' global error format in this batch.
 
-All five modules expose the source's public mutation routes as-is. The `me`
-endpoints use the existing Go verified-current-actor middleware rather than
-Nest's signature-free JWT decode; this is an inherited, documented security
-deviation. A separate authorization design change should not be mixed with
-this compatibility port.
+Mutation authorization is now explicit: only a current reviewer (or admin) can
+create/edit/delete their reviews; notification definitions are admin-managed;
+only admins can assign user-notification records or list them globally; only
+the owner/admin can inspect or mark a user-notification as read. Analytics
+creation now verifies the authenticated user. Anonymous reads of public reviews,
+recommendations, notification definitions and catalog are unchanged.
 
 Integration tests exercise all five domains against the existing disposable
-PostgreSQL schema. They also pin source-specific counts, nesting and filters.
+PostgreSQL schema. They pin the corrected scoped counts, nesting and filters.
 The end-to-end harness now includes all 28 routes from these five domains with
 deterministic seeded data and a separate NestJS server in the CI `nest-parity`
 job, in addition to the original Promotions replay. These are selected route
 cases, **not** an exhaustive full-application business-parity proof. Before
 cutover, checkout/auth/stock edge cases and real external providers still
 require independent verification.
+
+### Remaining checkout design blockers
+
+`POST /orders/checkout` still accepts `shipment.cost` from client input and
+is not bound to a trusted shipment quote/destination. Existing Address rows
+store free-text location fields; there is no authoritative RajaOngkir numeric
+destination ID or quote record in the schema. A cosmetic signed token over
+client-supplied origin/destination would **not** solve destination substitution.
+An authoritative address-to-carrier-location mapping and explicit quote-binding
+contract are prerequisites for a safe fix. Checkout also lacks a durable
+idempotency key/storage contract for retries. Neither weakness is represented
+as resolved by this correctness pass.
 
 
 ## PR #1 regression and real-service tests (November 4, 2026)

@@ -36,13 +36,13 @@ var updateFields = []promotionutil.Field{
 
 func (s *Service) Routes(app fiber.Router) {
 	r := app.Group("/reviews")
-	r.Post("/", s.create)
+	r.Post("/", s.sessions.RequireActor, s.create)
 	r.Get("/", s.findAll)
 	r.Get("/product/:id", s.byProduct)
 	r.Get("/me", s.sessions.RequireActor, s.byUser)
 	r.Get("/:id", s.byID)
-	r.Patch("/:id", s.update)
-	r.Delete("/:id", s.remove)
+	r.Patch("/:id", s.sessions.RequireActor, s.update)
+	r.Delete("/:id", s.sessions.RequireActor, s.remove)
 }
 
 func checkRating(rating float64) error {
@@ -64,6 +64,10 @@ func checkRating(rating float64) error {
 }
 
 func (s *Service) create(c fiber.Ctx) error {
+	actor, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
 	if err := promotionutil.ValidateFields(c, createFields, false); err != nil {
 		return err
 	}
@@ -75,6 +79,9 @@ func (s *Service) create(c fiber.Ctx) error {
 	}
 	if err := httpx.Bind(c, &in); err != nil {
 		return err
+	}
+	if !actor.Admin && in.UserID != actor.UserID {
+		return httpx.Forbidden()
 	}
 	if err := checkRating(in.Rating); err != nil {
 		return err
@@ -146,9 +153,9 @@ func (s *Service) byUser(c fiber.Ctx) error {
 	if err := s.db.WithContext(c.Context()).Where("user_id = ?", actor.UserID).Offset((page - 1) * limit).Limit(limit).Find(&rows).Error; err != nil {
 		return err
 	}
-	// Source ReviewsService.findByUser uses the global count, not the user's count.
+	// Pagination totals must describe the same user-scoped result set.
 	var total int64
-	if err := s.db.WithContext(c.Context()).Model(&domain.Review{}).Count(&total).Error; err != nil {
+	if err := s.db.WithContext(c.Context()).Model(&domain.Review{}).Where("user_id = ?", actor.UserID).Count(&total).Error; err != nil {
 		return err
 	}
 	if total == 0 {
@@ -186,7 +193,7 @@ func (s *Service) byProduct(c fiber.Ctx) error {
 		return err
 	}
 	var total int64
-	if err := s.db.WithContext(c.Context()).Model(&domain.Review{}).Count(&total).Error; err != nil {
+	if err := s.db.WithContext(c.Context()).Model(&domain.Review{}).Where("product_id = ?", id).Count(&total).Error; err != nil {
 		return err
 	}
 	if total == 0 {
@@ -200,9 +207,16 @@ func (s *Service) byProduct(c fiber.Ctx) error {
 }
 
 func (s *Service) update(c fiber.Ctx) error {
+	actor, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
 	var row domain.Review
 	if err := s.db.WithContext(c.Context()).First(&row, "id = ?", c.Params("id")).Error; err != nil {
 		return err
+	}
+	if !actor.Admin && row.UserID != actor.UserID {
+		return httpx.Forbidden()
 	}
 	if err := promotionutil.ValidateFields(c, updateFields, true); err != nil {
 		return err
@@ -244,9 +258,16 @@ func (s *Service) update(c fiber.Ctx) error {
 }
 
 func (s *Service) remove(c fiber.Ctx) error {
+	actor, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
 	var row domain.Review
 	if err := s.db.WithContext(c.Context()).First(&row, "id = ?", c.Params("id")).Error; err != nil {
 		return err
+	}
+	if !actor.Admin && row.UserID != actor.UserID {
+		return httpx.Forbidden()
 	}
 	if err := s.db.WithContext(c.Context()).Delete(&row).Error; err != nil {
 		return err

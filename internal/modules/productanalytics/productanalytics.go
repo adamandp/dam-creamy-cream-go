@@ -21,18 +21,22 @@ func NewService(db *gorm.DB, ses *sessions.Service) *Service {
 
 func (s *Service) Routes(app fiber.Router) {
 	r := app.Group("/product-analytics")
-	r.Post("/", s.create)
+	r.Post("/", s.sessions.RequireActor, s.create)
 	r.Get("/product/:id/count", s.productCount)
 	r.Get("/product/:id", s.byProduct)
 	r.Get("/user", s.sessions.RequireActor, s.byUser)
 }
 
 var createFields = []promotionutil.Field{
-	{Key: "userId", Label: "User id", Kind: "uuid", Nullable: true},
-	{Key: "productId", Label: "Product id", Kind: "uuid", Nullable: true},
+	{Key: "userId", Label: "User id", Kind: "uuid"},
+	{Key: "productId", Label: "Product id", Kind: "uuid"},
 }
 
 func (s *Service) create(c fiber.Ctx) error {
+	actor, err := s.sessions.Actor(c)
+	if err != nil {
+		return err
+	}
 	if err := promotionutil.ValidateFields(c, createFields, false); err != nil {
 		return err
 	}
@@ -43,14 +47,15 @@ func (s *Service) create(c fiber.Ctx) error {
 	if err := httpx.Bind(c, &body); err != nil {
 		return err
 	}
-	userID, productID := "unkown", "unkown" // Original NestJS spelling and null fallback.
-	if body.UserID != nil {
-		userID = *body.UserID
+	// PostgreSQL stores both IDs as non-null UUIDs. The NestJS "unkown"
+	// fallback causes an invalid-UUID database error; reject it at the edge.
+	if body.UserID == nil || body.ProductID == nil {
+		return fiber.NewError(400, "userId and productId must be valid UUIDs")
 	}
-	if body.ProductID != nil {
-		productID = *body.ProductID
+	if !actor.Admin && *body.UserID != actor.UserID {
+		return httpx.Forbidden()
 	}
-	m := domain.ProductAnalytics{UserID: userID, ProductID: productID}
+	m := domain.ProductAnalytics{UserID: *body.UserID, ProductID: *body.ProductID}
 	if err := s.db.WithContext(c.Context()).Create(&m).Error; err != nil {
 		return err
 	}
@@ -82,10 +87,9 @@ func (s *Service) list(c fiber.Ctx, predicate string, id string) error {
 	if err := s.db.WithContext(c.Context()).Where(predicate, id).Offset((page - 1) * limit).Limit(limit).Find(&rows).Error; err != nil {
 		return err
 	}
-	// The legacy service deliberately reports the global table count even for
-	// per-product and per-user pages. Keep this for parity, not as a correction.
+	// Count exactly the same filtered rows as the page, not the global table.
 	var total int64
-	if err := s.db.WithContext(c.Context()).Model(&domain.ProductAnalytics{}).Count(&total).Error; err != nil {
+	if err := s.db.WithContext(c.Context()).Model(&domain.ProductAnalytics{}).Where(predicate, id).Count(&total).Error; err != nil {
 		return err
 	}
 	if total == 0 {

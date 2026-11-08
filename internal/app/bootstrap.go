@@ -80,7 +80,7 @@ func Bootstrap(ctx context.Context, cfg config.Config, log *slog.Logger) (*Runti
 	reviews.NewService(db, ses).Routes(httpApp)
 	recommendations.NewService(db).Routes(httpApp)
 	productanalytics.NewService(db, ses).Routes(httpApp)
-	notifications.NewService(db).Routes(httpApp)
+	notifications.NewService(db, ses).Routes(httpApp)
 	usernotifications.NewService(db, ses).Routes(httpApp)
 	media.NewService(store).Routes(httpApp)
 	carts.NewService(db, ses).Routes(httpApp)
