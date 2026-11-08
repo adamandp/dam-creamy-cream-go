@@ -66,9 +66,11 @@ func TestCatalogAndProductInformationOnPrismaSchema(t *testing.T) {
 		query  string
 		status int
 	}{
-		{"q=%20", 200}, // whitespace is a valid one-character Zod string
-		{"min=", 200}, // z.coerce.number("") == 0
-		{"max=", 404}, // a supplied zero max excludes this positive-price product
+		// Whitespace is a valid one-character Zod string.
+		{"q=%20", 200},
+		// z.coerce.number("") == 0; max=0 excludes positive-price products.
+		{"min=", 200},
+		{"max=", 404},
 		{"q=", 400},
 		{"sort=", 400},
 		{"cat=", 400},
