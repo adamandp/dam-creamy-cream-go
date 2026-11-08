@@ -132,6 +132,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 	}
 	var m domain.Voucher
 	if err := s.db.First(&m, "id = ?", c.Params("id")).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Voucher")
+		}
 		return err
 	}
 	view, err := promotionutil.AsView(m)

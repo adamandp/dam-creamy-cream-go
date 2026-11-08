@@ -86,6 +86,20 @@ cases = [
     ("/users", "admin"),
     ("/users/" + CUSTOMER, "customer"),
     ("/addresses", "admin"),
+    # Missing records must expose the same entity name in Nest's 404 body,
+    # not Go's generic "Record not found" fallback.
+    ("/roles/" + MISSING, None),
+    ("/categories/" + MISSING, None),
+    ("/product/" + MISSING, None),
+    ("/users/" + MISSING, "admin"),
+    ("/addresses/" + MISSING, "admin"),
+    ("/reviews/" + MISSING, None),
+    ("/notifications/" + MISSING, None),
+    ("/user-notifications/" + MISSING, "admin"),
+    ("/discounts/" + MISSING, None),
+    ("/vouchers/" + MISSING, None),
+    ("/product-discounts/" + MISSING, None),
+    ("/user-vouchers/" + MISSING, "admin"),
 ]
 
 

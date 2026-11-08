@@ -133,6 +133,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 	}
 	var row domain.UserNotification
 	if err := s.db.WithContext(c.Context()).First(&row, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("User Notification")
+		}
 		return err
 	}
 	if !actor.Admin && actor.UserID != row.UserID {

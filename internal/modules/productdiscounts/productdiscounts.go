@@ -88,6 +88,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 	}
 	var m domain.ProductDiscount
 	if err := s.db.First(&m, "id = ?", c.Params("id")).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Product Discount")
+		}
 		return err
 	}
 	view, err := promotionutil.AsView(m)

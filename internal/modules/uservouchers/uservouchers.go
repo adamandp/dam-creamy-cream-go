@@ -159,6 +159,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 	}
 	var m domain.UserVoucher
 	if err := s.db.First(&m, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("User Voucher")
+		}
 		return err
 	}
 	who, err := s.sessions.Actor(c)

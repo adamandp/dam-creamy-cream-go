@@ -135,6 +135,9 @@ func mapReviews(rows []domain.Review) []fiber.Map {
 func (s *Service) byID(c fiber.Ctx) error {
 	var row domain.Review
 	if err := s.db.WithContext(c.Context()).First(&row, "id = ?", c.Params("id")).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Review")
+		}
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Review"), Data: legacyviews.Review(row)})

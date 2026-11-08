@@ -73,6 +73,9 @@ func (s *Service) findOne(c fiber.Ctx) error {
 	}
 	var u domain.User
 	if err := s.db.First(&u, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("User")
+		}
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "User"), Data: u})

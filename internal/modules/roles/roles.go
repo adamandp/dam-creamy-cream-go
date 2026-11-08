@@ -75,6 +75,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 	}
 	var role domain.Role
 	if err := s.db.First(&role, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Role")
+		}
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Role"), Data: mapRole(role)})
@@ -82,6 +85,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 func (s *Service) byName(c fiber.Ctx) error {
 	var role domain.Role
 	if err := s.db.First(&role, "name = ?", c.Params("name")).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Role")
+		}
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Role"), Data: mapRole(role)})

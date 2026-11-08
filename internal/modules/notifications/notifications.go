@@ -84,6 +84,9 @@ func (s *Service) byID(c fiber.Ctx) error {
 	}
 	var row domain.Notification
 	if err := s.db.WithContext(c.Context()).First(&row, "id = ?", id).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return httpx.NotFound("Notification")
+		}
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Notification"), Data: legacyviews.Notification(row)})
