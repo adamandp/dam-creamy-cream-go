@@ -99,11 +99,13 @@ func TestRemainingFiveNestModulesContracts(t *testing.T) {
 	create(&domain.ProductDiscount{ProductID: vanilla.ID.ID, DiscountID: discount.ID.ID, IsActive: true})
 	classicResponse := testBody(t, testCall(t, app, "GET", "/recommendations/classic", "", "", 200))
 	classicRows := requiredRows(t, classicResponse)
-	if len(classicRows) != 2 || classicRows[0].(map[string]any)["id"] != vanilla.ID.ID {
+	// Earlier PATCH changed Vanilla from five stars to three, so Chocolate
+	// (four stars) must now be ranked above it.
+	if len(classicRows) != 2 || classicRows[0].(map[string]any)["id"] != chocolate.ID.ID || classicRows[1].(map[string]any)["id"] != vanilla.ID.ID {
 		t.Fatalf("classic rating sort: %+v", classicRows)
 	}
-	if classicRows[0].(map[string]any)["discountPrice"] != float64(15000) {
-		t.Fatalf("Nest recommendation discount formula: %+v", classicRows[0])
+	if classicRows[1].(map[string]any)["discountPrice"] != float64(15000) {
+		t.Fatalf("Nest recommendation discount formula: %+v", classicRows[1])
 	}
 	categoryRows := requiredRows(t, testBody(t, testCall(t, app, "GET", "/recommendations/categories", "", "", 200)))
 	if len(categoryRows) != 2 {
