@@ -56,6 +56,18 @@ type ShipmentInput struct {
 }
 
 func (in *ShipmentInput) UnmarshalJSON(raw []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return err
+	}
+	// Zod's original pick() schema requires cost and description to be
+	// present. Description may explicitly be null; cost may not.
+	for _, field := range []string{"cost", "description"} {
+		value, found := fields[field]
+		if !found || (field == "cost" && bytes.Equal(bytes.TrimSpace(value), []byte("null"))) {
+			return fmt.Errorf("shipment.%s is required", field)
+		}
+	}
 	var wire struct {
 		Courier     string          `json:"courier"`
 		Service     string          `json:"service"`

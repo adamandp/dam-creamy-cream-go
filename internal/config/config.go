@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -9,18 +10,26 @@ import (
 )
 
 type Config struct {
-	Port             string
-	Environment      string
-	DatabaseURL      string
-	RedisURL         string
-	AccessJWTSecret  string
-	RefreshJWTSecret string
-	MinIOEndpoint    string
-	MinIOAccessKey   string
-	MinIOSecretKey   string
-	MinIOBucket      string
-	MinIOUseSSL      bool
-	PublicAPIURL     string
+	Port              string
+	Environment       string
+	DatabaseURL       string
+	RedisURL          string
+	AccessJWTSecret   string
+	RefreshJWTSecret  string
+	MinIOEndpoint     string
+	MinIOAccessKey    string
+	MinIOSecretKey    string
+	MinIOBucket       string
+	MinIOUseSSL       bool
+	PublicAPIURL      string
+	RajaOngkirBaseURL string
+	RajaOngkirAPIKey  string
+
+	RajaOngkirRateLimit int
+
+	RajaOngkirGlobalRateLimit int
+
+	TrustedProxyCIDRs []string
 
 	CORSAllowedOrigins []string
 }
@@ -34,24 +43,44 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	limit, err := strconv.Atoi(env("RAJAONGKIR_RATE_LIMIT_PER_MINUTE", "30"))
+	if err != nil || limit < 1 || limit > 1000 {
+		return Config{}, errors.New("RAJAONGKIR_RATE_LIMIT_PER_MINUTE must be an integer between 1 and 1000")
+	}
+	globalLimit, err := strconv.Atoi(env("RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE", "30"))
+	if err != nil || globalLimit < 1 || globalLimit > 100000 {
+		return Config{}, errors.New("RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE must be an integer between 1 and 100000")
+	}
+	trustedProxyCIDRs, err := parseTrustedProxyCIDRs(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		return Config{}, err
+	}
 	port := env("PORT", "3000")
 	ssl, err := strconv.ParseBool(env("MINIO_USE_SSL", "false"))
 	if err != nil {
 		return Config{}, errors.New("MINIO_USE_SSL must be true or false")
 	}
 	cfg := Config{
-		Port:             port,
-		Environment:      env("NODE_ENV", "development"),
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		RedisURL:         os.Getenv("REDIS_URL"),
-		AccessJWTSecret:  os.Getenv("ACCESS_JWT_SECRET"),
-		RefreshJWTSecret: os.Getenv("REFRESH_JWT_SECRET"),
-		MinIOEndpoint:    os.Getenv("MINIO_ENDPOINT"),
-		MinIOAccessKey:   os.Getenv("MINIO_ACCESS_KEY"),
-		MinIOSecretKey:   os.Getenv("MINIO_SECRET_KEY"),
-		MinIOBucket:      env("MINIO_BUCKET", "creamy-cream"),
-		MinIOUseSSL:      ssl,
-		PublicAPIURL:     env("PUBLIC_API_URL", "http://localhost:"+port),
+		Port:              port,
+		Environment:       env("NODE_ENV", "development"),
+		DatabaseURL:       os.Getenv("DATABASE_URL"),
+		RedisURL:          os.Getenv("REDIS_URL"),
+		AccessJWTSecret:   os.Getenv("ACCESS_JWT_SECRET"),
+		RefreshJWTSecret:  os.Getenv("REFRESH_JWT_SECRET"),
+		MinIOEndpoint:     os.Getenv("MINIO_ENDPOINT"),
+		MinIOAccessKey:    os.Getenv("MINIO_ACCESS_KEY"),
+		MinIOSecretKey:    os.Getenv("MINIO_SECRET_KEY"),
+		MinIOBucket:       env("MINIO_BUCKET", "creamy-cream"),
+		MinIOUseSSL:       ssl,
+		PublicAPIURL:      env("PUBLIC_API_URL", "http://localhost:"+port),
+		RajaOngkirBaseURL: os.Getenv("RAJAONGKIR_BASE_URL"),
+		RajaOngkirAPIKey:  os.Getenv("RAJAONGKIR_API_KEY"),
+
+		RajaOngkirRateLimit: limit,
+
+		RajaOngkirGlobalRateLimit: globalLimit,
+
+		TrustedProxyCIDRs: trustedProxyCIDRs,
 
 		CORSAllowedOrigins: allowedOrigins,
 	}
@@ -61,7 +90,13 @@ func Load() (Config, error) {
 	if cfg.MinIOEndpoint == "" || cfg.MinIOAccessKey == "" || cfg.MinIOSecretKey == "" {
 		return Config{}, errors.New("MINIO_ENDPOINT, MINIO_ACCESS_KEY and MINIO_SECRET_KEY are required")
 	}
+	if (cfg.RajaOngkirBaseURL == "") != (cfg.RajaOngkirAPIKey == "") {
+		return Config{}, errors.New("RAJAONGKIR_BASE_URL and RAJAONGKIR_API_KEY must be configured together")
+	}
 	if cfg.Environment == "production" {
+		if cfg.RajaOngkirBaseURL != "" && !strings.HasPrefix(cfg.RajaOngkirBaseURL, "https://") {
+			return Config{}, errors.New("RAJAONGKIR_BASE_URL must use HTTPS in production")
+		}
 		if len(cfg.CORSAllowedOrigins) == 0 {
 			return Config{}, errors.New("FRONTEND_ORIGINS must explicitly list trusted origins in production")
 		}
@@ -114,4 +149,30 @@ func (c Config) OriginAllowed(origin string) bool {
 		}
 	}
 	return false
+}
+
+func parseTrustedProxyCIDRs(raw string) ([]string, error) {
+	trusted := []string{}
+	seen := make(map[string]struct{})
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if address, err := netip.ParseAddr(entry); err == nil {
+			entry = address.String()
+		} else if network, err := netip.ParsePrefix(entry); err == nil {
+			if network.Bits() == 0 {
+				return nil, errors.New("TRUSTED_PROXY_CIDRS cannot trust all IP addresses")
+			}
+			entry = network.Masked().String()
+		} else {
+			return nil, errors.New("TRUSTED_PROXY_CIDRS must list valid IP addresses or CIDRs")
+		}
+		if _, found := seen[entry]; !found {
+			seen[entry] = struct{}{}
+			trusted = append(trusted, entry)
+		}
+	}
+	return trusted, nil
 }

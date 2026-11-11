@@ -134,7 +134,7 @@ func zodFieldIssues(f Field, raw json.RawMessage, exists bool) []map[string]any 
 			return []map[string]any{invalidType(f, "string")}
 		}
 		issues := []map[string]any{}
-		n := len([]rune(str))
+		n := httpx.JSStringLength(str)
 		if n < f.Min {
 			issues = append(issues, lengthIssue(f, true))
 		}

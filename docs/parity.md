@@ -22,13 +22,13 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 | Vouchers | vouchers | PORT + TESTS | CRUD, validation, nullable fields and soft-disable verified; checkout redemption remains coupled to pending Orders. |
 | User Vouchers | uservouchers | PORT + TESTS | Claim/read/mark USED and nested voucher verified; /user routing defect intentionally corrected. |
 | Orders | orders | PR #3 PORT + TESTS | Explicit Go HTTP checkout/list/detail surface, atomic Order/OrderItem/Payment/Shipment writes, stock locks, cart decrement, discount and voucher validation; original Nest has CQRS steps but no HTTP Orders route. |
-| Payments | payments | PENDING | Verify existing service behavior. |
-| Shipments | shipments | PENDING | Shipping cost external integration must be traced/ported. |
-| Reviews | reviews | PENDING | User/product reviews. |
-| Recommendations | recommendations | PENDING | Classic, category, offers, related. |
-| Product Analytics | productanalytics | PENDING | Product views/counts. |
-| Notifications | notifications | PENDING | CRUD. |
-| User Notifications | usernotifications | PENDING | User-specific feed/read/counts. |
+| Payments | payments | PR #4 SCAFFOLD PARITY + TESTS | NestJS PaymentService only returns literal strings; matching endpoints never charge or mutate payment records. |
+| Shipments | shipments | PR #4 PORT + TESTS | List/detail, status PATCH, public cost proxy via RajaOngkir with Redis per-IP and global provider quotas, explicit trusted proxies, positive integer provider inputs, and Prisma millisecond UTC timestamps; owner/admin ACL deliberately fixes unauthenticated legacy reads/writes. External carrier API needs real-credential verification. |
+| Reviews | reviews | PR #5 PORT + TESTS | Create/list/detail/product/me/update/delete, including source global-count pagination. |
+| Recommendations | recommendations | PR #5 PORT + TESTS | Classic, categories, offers, related; original ranking/discount formulas. |
+| Product Analytics | productanalytics | PR #5 PORT + TESTS | Create, product/user views and count; original global-count pagination. |
+| Notifications | notifications | PR #5 PORT + TESTS | CRUD and existing DTO constraints. |
+| User Notifications | usernotifications | PR #5 PORT + TESTS | CRUD subset, feed, read and counts with nested Notification JSON. |
 
 ## Non-negotiable before cutting over
 
@@ -50,6 +50,71 @@ Source: `adamandp/dam-creamy-cream-be` / `master`, Nov 4, 2026.
 - Role pagination keeps the original `Category retrieved` response message from `roles.service.ts`, even though it looks incorrect.
 
 No unimplemented business logic is represented as complete.
+
+## PR #5 — Remaining five NestJS domains
+
+All 28 remaining NestJS controller routes are registered in the Go branch:
+Reviews (7), Recommendations (4), Product Analytics (4), Notifications (5),
+and User Notifications (8). Each module ports the existing service's query,
+response and mutation semantics; this **does not certify whole-app 1:1 parity**.
+
+The initial PR #5 port retained the following source defects. The subsequent
+PR #5 correctness/security pass fixes the marked issues without changing the
+PostgreSQL schema; the NestJS-vs-Go comparator explicitly approves these
+additional deviations:
+
+- `ReviewsService.findByUser` and `.findByProduct` use a **global** Review count
+  in pagination, even though rows are scoped. **Fixed in Go:** scoped counts.
+- `ReviewsController.findAll` never injects `@Query()`, so the NestJS route
+  crashes with 500; Go intentionally exposes the underlying working service
+  list and returns 200. `GET /reviews/me` and `GET /user-notifications/me`
+  are shadowed by their preceding `/:id` route in Nest; Go registers the
+  intended static routes first. These are explicit HTTP behavior deviations.
+- Product Analytics pages also use a **global** count. **Fixed in Go:** scoped counts.
+- `UserNotificationsService.findByNotification` and `.findByNotificationCount`
+  filter `user_id` with the **notification ID**, not `notification_id`.
+  **Fixed in Go:** filter on `notification_id`.
+- User notification count includes read records; it is not an unread count.
+- Recommendations deliberately use their own historical discount computation
+  rather than the corrected Catalog/Checkout shared price calculation. The
+  offers percentage-ranking expression uses `discount.value / 100`, and the
+  source takes its first five offers **before** sorting them.
+- Nullable Product Analytics IDs in the source use the misspelled `unkown`
+  fallback, which is invalid for the UUID database columns. **Fixed in Go:**
+  reject null/missing IDs with a client error before database persistence.
+- Nest's Notification Zod title length allows 100 characters although the
+  underlying Prisma VARCHAR(50) column is narrower. **Fixed in Go:** limit 50.
+- The existing Go shared error handler adds `error: "Not Found"` to an HTTP
+  404, while the NestJS custom exception returns only statusCode/message.
+  Do not change the earlier Go modules' global error format in this batch.
+
+Mutation authorization is now explicit: only a current reviewer (or admin) can
+create/edit/delete their reviews; notification definitions are admin-managed;
+only admins can assign user-notification records or list them globally; only
+the owner/admin can inspect or mark a user-notification as read. Analytics
+creation now verifies the authenticated user. Anonymous reads of public reviews,
+recommendations, notification definitions and catalog are unchanged.
+
+Integration tests exercise all five domains against the existing disposable
+PostgreSQL schema. They pin the corrected scoped counts, nesting and filters.
+The end-to-end harness now includes all 28 routes from these five domains with
+deterministic seeded data and a separate NestJS server in the CI `nest-parity`
+job, in addition to the original Promotions replay. These are selected route
+cases, **not** an exhaustive full-application business-parity proof. Before
+cutover, checkout/auth/stock edge cases and real external providers still
+require independent verification.
+
+### Remaining checkout design blockers
+
+`POST /orders/checkout` still accepts `shipment.cost` from client input and
+is not bound to a trusted shipment quote/destination. Existing Address rows
+store free-text location fields; there is no authoritative RajaOngkir numeric
+destination ID or quote record in the schema. A cosmetic signed token over
+client-supplied origin/destination would **not** solve destination substitution.
+An authoritative address-to-carrier-location mapping and explicit quote-binding
+contract are prerequisites for a safe fix. Checkout also lacks a durable
+idempotency key/storage contract for retries. Neither weakness is represented
+as resolved by this correctness pass.
 
 
 ## PR #1 regression and real-service tests (November 4, 2026)
@@ -135,3 +200,12 @@ Public Cart/Catalog/Detail price queries now exclude discounts whose global rede
 - Credentialed CORS no longer reflects arbitrary Origin headers; production requires a configured `FRONTEND_ORIGINS` allowlist. This deliberately hardens the inherited NestJS `origin: true` behavior.
 - Request-bound operations use request contexts; detached compensating cleanup stays independent. Pricing unit tests are now under `tests/unit`.
 - These are scoped corrections in PR #3 only; the previous 34 matches / 13 documented deviations are not a substitute for complete NestJS regression testing.
+
+
+### PR #4: Shipments and legacy Payments endpoints (2026-11-07)
+
+- Shipment list is admin-only, detail owner/admin, status mutation admin-only. This tightens NestJS's unauthenticated access. Mutating Shipment.status does not silently update Orders or Payments.
+- Public POST /shipments/cost uses numeric origin, destination, weight and the original 17 couriers to call RajaOngkir's URL-encoded domestic-cost API from the server; it returns message, status and data. Missing provider settings yield 503, upstream errors 502. Positive finite values are an intentional stricter input rule. Fake-provider tests exist; actual provider verification requires staging credentials.
+- PaymentsService in NestJS is an inert scaffold: five literal-text routes without data mutation. PR #4 reproduces it; it does NOT process capture, settlement or refunds.
+- No database migration, changes to PR #1/#2/#3, or changes to the dummy login. Checkout still accepts an unverified caller-supplied shipment.cost; production quote binding is a separate concern.
+- PR #4 follow-up fixes the three inherited PR #3 findings: aggregate prices reconcile from rounded unit prices, `FREE_ITEM` reward quantities follow the NestJS configuration rather than an arbitrary 100-unit cap (with inventory overflow checks), and both required shipment `cost` and nullable `description` keys are validated. Checkout quote-binding remains a separate unresolved contract/integrity issue because the schema lacks authoritative destination/weight data.

@@ -103,3 +103,43 @@ The deliberate dummy-customer-login endpoint and its known test account credenti
 ### PR #3: Orders / Checkout
 
 POST /orders/checkout exposes an explicit authenticated API contract for the existing NestJS 17-step CQRS checkout handler (its OrdersController had no HTTP route). One GORM/PostgreSQL transaction coordinates Cart, Inventory, Discounts, Vouchers and UserVoucher claims and inserts Order/OrderItems, Payment PENDING and Shipment PENDING. New order list/detail reads are owner/admin scoped. See [full request shape, safeguards and limitations](orders-checkout.md). Payment processing and trusted courier pricing are **not** implemented; the caller provides a validated but otherwise unverified shipping cost.
+
+
+### PR #4: Shipments / Payments
+
+- GET /shipments?page=1&limit=10: current admin access JWT, paginated Shipment rows, 404 if empty (NestJS behavior).
+- GET /shipments/:id: owner or admin access JWT. Invalid UUID 400, missing 404, foreign owner 403.
+- PATCH /shipments/:id/status: admin access JWT, body {"status":"SHIPPED"}, enum PENDING/SHIPPED/DELIVERED/CANCELLED; changes only Shipment status.
+- POST /shipments/cost: HTTP 201, public body {"origin":123,"destination":456,"weight":1000}; sends a server-only key to RajaOngkir; returns {message,status,data}. Missing config 503, upstream failure 502. Does not validate Checkout shipping fees.
+- Payments POST/GET/PATCH/DELETE endpoints reproduce NestJS scaffold literal text only; there is no payment mutation. See [PR #4 contract](shipments-payments.md).
+## PR #5: Reviews, Recommendations, Analytics and Notifications
+
+The original NestJS routes are now registered in the stacked Go branch:
+
+| Domain | Routes |
+|---|---|
+| Reviews | `POST /reviews`, `GET /reviews`, `GET /reviews/product/:id`, `GET /reviews/:id`, `GET /reviews/me`, `PATCH /reviews/:id`, `DELETE /reviews/:id` |
+| Recommendations | `GET /recommendations/classic`, `GET /recommendations/categories`, `GET /recommendations/offers`, `GET /recommendations/related/:id` |
+| Product Analytics | `POST /product-analytics`, `GET /product-analytics/product/:id`, `GET /product-analytics/user`, `GET /product-analytics/product/:id/count` |
+| Notifications | `POST /notifications`, `GET /notifications`, `GET /notifications/:id`, `PATCH /notifications/:id`, `DELETE /notifications/:id` |
+| User Notifications | `POST /user-notifications`, `GET /user-notifications`, `GET /user-notifications/:id`, `GET /user-notifications/me`, `GET /user-notifications/count/me`, `GET /user-notifications/notification/:id`, `GET /user-notifications/notification/:id/count`, `PATCH /user-notifications/:id` |
+
+The public read surfaces remain available for Reviews, Recommendations,
+Product Analytics by product, and Notification definitions. The correctness
+follow-up introduces these explicit verified-bearer authorization rules:
+
+- Reviews: authenticated users may create their own review; editing/deleting
+  requires its owner or an admin. `GET /reviews/me` requires an actor.
+- Product Analytics: creation requires an actor, and the submitted `userId`
+  must match the actor unless admin. `userId` and `productId` must be real UUIDs,
+  not null/missing. `GET /product-analytics/user` requires an actor.
+- Notification definitions: mutations are admin-only, reads remain public.
+  Titles are capped at 50 characters to match PostgreSQL `VARCHAR(50)`.
+- User Notifications: creating and global/notification-wide listing/counts are
+  admin-only; reading an individual record or marking it read requires its
+  owner or an admin. The `me` feed/count require an actor.
+
+Review and Product Analytics pagination totals now count the filtered rows;
+notification-wide filters use `notification_id`, not the original incorrect
+`user_id` predicate. See `parity.md` for the intentionally changed NestJS
+behavior. An absent collection returns 404 on the corresponding paginated list.

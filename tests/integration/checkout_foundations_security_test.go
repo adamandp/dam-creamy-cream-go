@@ -198,6 +198,8 @@ func TestInventoryValidationsAndConcurrentEdits(t *testing.T) {
 	}{
 		{`{"quantity":-4}`, 400},
 		{`{"reservedQuantity":-2}`, 400},
+		{`{"quantity":2147483648}`, 400},
+		{`{"reservedQuantity":2147483648}`, 400},
 		{`{"quantity":4}`, 409},
 		{`{"reservedQuantity":11}`, 409},
 		{`{"quantity":0,"reservedQuantity":0}`, 200},

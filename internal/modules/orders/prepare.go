@@ -80,7 +80,9 @@ func (s *Service) prepareCheckout(tx *gorm.DB, body CheckoutInput, now time.Time
 		if !saneMoney(product.Price) {
 			return cart, data, unavailable("Invalid product price")
 		}
-		p := purchase{item: item, cart: row, product: product, unitFinal: product.Price}
+		// The database persists unit prices in cents. Calculate from that same
+		// rounded unit amount so quantity > 1 cannot disagree with OrderItem.
+		p := purchase{item: item, cart: row, product: product, unitFinal: amount(product.Price)}
 		if item.DiscountID != nil {
 			// An ID alone does not entitle a customer to use an unrelated/inactive discount.
 			var association domain.ProductDiscount
@@ -88,9 +90,15 @@ func (s *Service) prepareCheckout(tx *gorm.DB, body CheckoutInput, now time.Time
 				First(&association).Error; err != nil {
 				return cart, data, unavailable("Discount is not active for this product")
 			}
+			if discountQuantities[*item.DiscountID] > 2147483647-item.Quantity {
+				return cart, data, unavailable("Discount quantity exceeds inventory limits")
+			}
 			discountQuantities[*item.DiscountID] += item.Quantity
 		}
 		data.items = append(data.items, p)
+		if data.allQuantities[item.ProductID] > 2147483647-item.Quantity {
+			return cart, data, unavailable("Order quantity exceeds inventory limits")
+		}
 		data.allQuantities[item.ProductID] += item.Quantity
 	}
 	// Each shared discount is locked once and quota is checked using the sum of
@@ -136,8 +144,8 @@ func (s *Service) prepareCheckout(tx *gorm.DB, body CheckoutInput, now time.Time
 				return cart, data, unavailable("Unsupported discount type")
 			}
 		}
-		p.unitDiscount = amount(p.product.Price - p.unitFinal)
-		data.totalPrice += p.product.Price * float64(p.item.Quantity)
+		p.unitDiscount = amount(amount(p.product.Price) - p.unitFinal)
+		data.totalPrice += amount(p.product.Price) * float64(p.item.Quantity)
 		data.lineDiscount += p.unitDiscount * float64(p.item.Quantity)
 	}
 	data.totalPrice = amount(data.totalPrice)
@@ -162,8 +170,14 @@ func sortedIDs(m map[string]int) []string {
 	return ids
 }
 func addGift(quantities map[string]int, gifts *[]domain.OrderItem, productID *string, qty *int) error {
-	if productID == nil || qty == nil || *qty < 1 || *qty > 100 {
+	// NestJS imposes no arbitrary 100-unit limit on a configured reward.
+	// PostgreSQL Prisma Int inventory counters are signed 32-bit numbers;
+	// reject aggregate overflow before the stock reservation update.
+	if productID == nil || qty == nil || *qty < 1 || *qty > 2147483647 {
 		return unavailable("Invalid free-item reward configuration")
+	}
+	if quantities[*productID] > 2147483647-*qty {
+		return unavailable("Free-item reward quantity exceeds inventory limits")
 	}
 	quantities[*productID] += *qty
 	*gifts = append(*gifts, domain.OrderItem{ProductID: *productID, Quantity: *qty, Price: 0, FinalPrice: 0, DiscountAmount: 0})
