@@ -2,59 +2,14 @@ package carts
 
 import (
 	"time"
-
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/pricing"
-	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-type Service struct {
-	db      *gorm.DB
-	session *sessions.Service
-}
-
-func NewService(db *gorm.DB, s *sessions.Service) *Service { return &Service{db: db, session: s} }
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/carts")
-	r.Post("/user/add", s.add)
-	r.Post("/user/remove", s.remove)
-	r.Get("/user", s.byUser)
-}
-
-type Input struct {
-	ProductID string `json:"productId"`
-	Quantity  int    `json:"quantity"`
-}
-
-func validateInput(in Input) error {
-	if err := httpx.UUID(in.ProductID); err != nil {
-		return err
-	}
-	if in.Quantity < 1 || in.Quantity > 100 {
-		return fiber.NewError(400, "quantity must be between 1 and 100")
-	}
-	return nil
-}
-func (s *Service) validateRelated(tx *gorm.DB, userID, productID string) error {
-	var count int64
-	if err := tx.Model(&domain.User{}).Where("id = ?", userID).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		return httpx.NotFound("User")
-	}
-	if err := tx.Model(&domain.Product{}).Where("id = ?", productID).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		return httpx.NotFound("Product")
-	}
-	return nil
-}
 func (s *Service) add(c fiber.Ctx) error {
 	claims, err := s.session.CookieUser(c)
 	if err != nil {
@@ -97,6 +52,7 @@ func (s *Service) add(c fiber.Ctx) error {
 	}
 	return c.Status(201).JSON(httpx.Response{Message: httpx.Message("create", "Cart")})
 }
+
 func (s *Service) remove(c fiber.Ctx) error {
 	claims, err := s.session.CookieUser(c)
 	if err != nil {
@@ -130,28 +86,6 @@ func (s *Service) remove(c fiber.Ctx) error {
 		return err
 	}
 	return c.Status(201).JSON(httpx.Response{Message: httpx.Message("delete", "Cart")})
-}
-
-type CartRow struct {
-	ProductID     string     `gorm:"column:product_id"`
-	Quantity      int        `gorm:"column:quantity"`
-	Name          string     `gorm:"column:name"`
-	ImageURL      *string    `gorm:"column:image_url"`
-	Category      string     `gorm:"column:category"`
-	Price         float64    `gorm:"column:price"`
-	DiscountType  *string    `gorm:"column:discount_type"`
-	DiscountValue *float64   `gorm:"column:discount_value"`
-	StartDate     *time.Time `gorm:"column:start_date"`
-	EndDate       *time.Time `gorm:"column:end_date"`
-}
-type CartResponse struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	ImageURL      *string  `json:"imageUrl"`
-	Category      string   `json:"category"`
-	Price         float64  `json:"price"`
-	DiscountPrice *float64 `json:"discountPrice"`
-	Qty           int      `json:"qty"`
 }
 
 func (s *Service) byUser(c fiber.Ctx) error {

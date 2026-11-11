@@ -9,68 +9,6 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type Service struct {
-	db       *gorm.DB
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, s *sessions.Service) *Service { return &Service{db: db, sessions: s} }
-
-type CreateInput struct {
-	UserID               string `json:"userId"`
-	RecipientName        string `json:"recipientName"`
-	RecipientPhoneNumber string `json:"recipientPhoneNumber"`
-	Province             string `json:"province"`
-	City                 string `json:"city"`
-	Subdistrict          string `json:"subdistrict"`
-	Village              string `json:"village"`
-	PostalCode           string `json:"postalCode"`
-	Address              string `json:"address"`
-	IsPrimary            bool   `json:"isPrimary"`
-}
-type UpdateInput struct {
-	UserID               *string `json:"userId"`
-	RecipientName        *string `json:"recipientName"`
-	RecipientPhoneNumber *string `json:"recipientPhoneNumber"`
-	Province             *string `json:"province"`
-	City                 *string `json:"city"`
-	Subdistrict          *string `json:"subdistrict"`
-	Village              *string `json:"village"`
-	PostalCode           *string `json:"postalCode"`
-	Address              *string `json:"address"`
-	IsPrimary            *bool   `json:"isPrimary"`
-}
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/addresses")
-	r.Post("/", s.sessions.RequireActor, s.create)
-	r.Get("/", s.sessions.RequireAdmin, s.findAll)
-	r.Get("/user", s.findByUser)
-	r.Get("/:id", s.sessions.RequireActor, s.findOne)
-	r.Patch("/:id", s.sessions.RequireActor, s.update)
-	r.Delete("/:id", s.sessions.RequireActor, s.remove)
-}
-func validateInput(body CreateInput) error {
-	if err := httpx.UUID(body.UserID); err != nil {
-		return err
-	}
-	fields := []struct {
-		v, name  string
-		min, max int
-	}{{body.RecipientName, "recipientName", 1, 100}, {body.RecipientPhoneNumber, "recipientPhoneNumber", 4, 100}, {body.Province, "province", 1, 100}, {body.City, "city", 1, 100}, {body.Subdistrict, "subdistrict", 1, 100}, {body.Village, "village", 1, 100}, {body.PostalCode, "postalCode", 0, 100}, {body.Address, "address", 1, 100}}
-	for _, f := range fields {
-		if err := httpx.NonBlank(f.v, f.min, f.max, f.name); err != nil {
-			return err
-		}
-	}
-	if err := httpx.Name(body.RecipientName, 1, 100, "Recipient Name"); err != nil {
-		return err
-	}
-	if err := httpx.Phone(body.RecipientPhoneNumber); err != nil {
-		return err
-	}
-	return nil
-}
 func (s *Service) create(c fiber.Ctx) error {
 	var body CreateInput
 	if err := httpx.BindStrict(c, &body); err != nil {
@@ -134,6 +72,7 @@ func (s *Service) create(c fiber.Ctx) error {
 	}
 	return c.Status(201).JSON(httpx.Response{StatusCode: 201, Message: httpx.Message("create", "Address")})
 }
+
 func (s *Service) findAll(c fiber.Ctx) error {
 	page, limit, err := httpx.Page(c)
 	if err != nil {
@@ -152,6 +91,7 @@ func (s *Service) findAll(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Address"), Data: data, Paging: httpx.Pagination(page, limit, total)})
 }
+
 func (s *Service) findByUser(c fiber.Ctx) error {
 	claims, err := s.sessions.CookieUser(c)
 	if err != nil {
@@ -166,6 +106,7 @@ func (s *Service) findByUser(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "User Address"), Data: items})
 }
+
 func (s *Service) findOne(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
@@ -187,6 +128,7 @@ func (s *Service) findOne(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Address"), Data: m})
 }
+
 func (s *Service) update(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
@@ -289,6 +231,7 @@ func (s *Service) update(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("update", "Address")})
 }
+
 func (s *Service) remove(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {

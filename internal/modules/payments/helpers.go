@@ -1,6 +1,3 @@
-// Package payments preserves the current NestJS PaymentsService HTTP behavior.
-// The upstream service is a scaffold: these routes do not charge, update,
-// or delete payments. Checkout creates real PENDING payment records.
 package payments
 
 import (
@@ -10,28 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/gofiber/fiber/v3"
 )
-
-type Service struct{}
-
-func NewService() *Service { return &Service{} }
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/payments")
-	r.Post("/", func(c fiber.Ctx) error { return c.Status(201).SendString("This action adds a new payment") })
-	r.Get("/", func(c fiber.Ctx) error { return c.SendString("This action returns all payments") })
-	r.Get("/:id", func(c fiber.Ctx) error {
-		return c.SendString("This action returns a #" + legacyNumericID(c.Params("id")) + " payment")
-	})
-	r.Patch("/:id", func(c fiber.Ctx) error {
-		return c.SendString("This action updates a #" + legacyNumericID(c.Params("id")) + " payment")
-	})
-	r.Delete("/:id", func(c fiber.Ctx) error {
-		return c.SendString("This action removes a #" + legacyNumericID(c.Params("id")) + " payment")
-	})
-}
 
 var (
 	jsDecimalNumber = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
@@ -43,6 +19,7 @@ var (
 // NestJS uses the JavaScript unary + on @Param('id') before interpolating the
 // number into a scaffold string. Handle Number()'s decimal, radix and infinity
 // forms without treating Go-specific "Inf"/hex-float syntax as valid JS input.
+
 func legacyNumericID(raw string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {

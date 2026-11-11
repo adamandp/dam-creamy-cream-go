@@ -4,31 +4,9 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/promotionutil"
-	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 )
-
-type Service struct {
-	db       *gorm.DB
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, ses *sessions.Service) *Service { return &Service{db: db, sessions: ses} }
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/product-discounts")
-	r.Post("/", s.sessions.RequireAdmin, s.create)
-	r.Get("/", s.findAll)
-	r.Get("/product/:productId", s.byProductID)
-	r.Get("/:id", s.byID)
-	r.Delete("/:id", s.sessions.RequireAdmin, s.remove)
-}
-
-type CreateInput struct {
-	ProductID  string `json:"productId"`
-	DiscountID string `json:"discountId"`
-}
 
 func (s *Service) create(c fiber.Ctx) error {
 	if err := promotionutil.ValidateFields(c, promotionutil.ProductDiscountFields(), false); err != nil {

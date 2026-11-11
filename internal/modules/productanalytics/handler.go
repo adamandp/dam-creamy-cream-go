@@ -7,30 +7,7 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/promotionutil"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
-	"gorm.io/gorm"
 )
-
-type Service struct {
-	db       *gorm.DB
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, ses *sessions.Service) *Service {
-	return &Service{db: db, sessions: ses}
-}
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/product-analytics")
-	r.Post("/", s.sessions.RequireActor, s.create)
-	r.Get("/product/:id/count", s.productCount)
-	r.Get("/product/:id", s.byProduct)
-	r.Get("/user", s.sessions.RequireActor, s.byUser)
-}
-
-var createFields = []promotionutil.Field{
-	{Key: "userId", Label: "User id", Kind: "uuid"},
-	{Key: "productId", Label: "Product id", Kind: "uuid"},
-}
 
 func (s *Service) create(c fiber.Ctx) error {
 	actor, err := s.sessions.Actor(c)

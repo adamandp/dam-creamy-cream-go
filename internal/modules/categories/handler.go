@@ -5,46 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
-
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
-	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-type Service struct {
-	db       *gorm.DB
-	cache    *redis.Client
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, cache *redis.Client, ses *sessions.Service) *Service {
-	return &Service{db: db, cache: cache, sessions: ses}
-}
-
-type CreateInput struct {
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
-	IsActive    *bool   `json:"isActive"`
-}
-type UpdateInput struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	IsActive    *bool   `json:"isActive"`
-}
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/categories")
-	r.Post("/", s.sessions.RequireAdmin, s.create)
-	r.Get("/", s.findAll)
-	r.Get("/:id", s.findOne)
-	r.Patch("/:id", s.sessions.RequireAdmin, s.update)
-	r.Delete("/:id", s.sessions.RequireAdmin, s.remove)
-}
 func (s *Service) create(c fiber.Ctx) error {
 	var body CreateInput
 	if err := httpx.Bind(c, &body); err != nil {
@@ -71,6 +39,7 @@ func (s *Service) create(c fiber.Ctx) error {
 	s.invalidateCache()
 	return c.Status(201).JSON(httpx.Response{Message: httpx.Message("create", "category")})
 }
+
 func (s *Service) findAll(c fiber.Ctx) error {
 	page, limit, err := httpx.Page(c)
 	if err != nil {
@@ -115,6 +84,7 @@ func (s *Service) findAll(c fiber.Ctx) error {
 	}
 	return c.JSON(response)
 }
+
 func (s *Service) findOne(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
@@ -129,6 +99,7 @@ func (s *Service) findOne(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "category"), Data: m})
 }
+
 func (s *Service) update(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
@@ -175,6 +146,7 @@ func (s *Service) update(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("update", "category")})
 }
+
 func (s *Service) remove(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
@@ -189,25 +161,4 @@ func (s *Service) remove(c fiber.Ctx) error {
 	}
 	s.invalidateCache()
 	return c.JSON(httpx.Response{Message: httpx.Message("delete", "category")})
-}
-
-func valueOrNil(v *string) any {
-	if v == nil {
-		return nil
-	}
-	return *v
-}
-
-// categoryRevisionKey intentionally has no TTL. An expired version counter
-// could resurrect a previously cached page. Page values remain TTL-bound.
-const categoryRevisionKey = "categories:revision"
-
-func (s *Service) invalidateCache() {
-	// Redis is best-effort: a cache outage must not report a failed category
-	// mutation after PostgreSQL has already committed the write.
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	if err := s.cache.Incr(ctx, categoryRevisionKey).Err(); err != nil {
-		slog.Warn("category cache revision increment failed", "error", err)
-	}
 }

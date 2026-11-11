@@ -2,30 +2,13 @@ package auth
 
 import (
 	"time"
-
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
-type Service struct {
-	db         *gorm.DB
-	sessions   *sessions.Service
-	production bool
-}
-
-func NewService(db *gorm.DB, s *sessions.Service, production bool) *Service {
-	return &Service{db: db, sessions: s, production: production}
-}
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/auth")
-	r.Post("/dummy-customer-login", s.dummyLogin)
-	r.Post("/logout", s.logout)
-	r.Post("/logout-all", s.logoutAll)
-}
 func (s *Service) dummyLogin(c fiber.Ctx) error {
 	var u domain.User
 	if err := s.db.Where("username = ? OR email = ? OR phone_number = ?", "DummyUser", "DummyUser", "DummyUser").First(&u).Error; err != nil {
@@ -41,9 +24,11 @@ func (s *Service) dummyLogin(c fiber.Ctx) error {
 	c.Cookie(&fiber.Cookie{Name: "refreshToken", Value: tokens.RefreshToken, HTTPOnly: true, Secure: s.production, SameSite: "Lax", Path: "/", Expires: time.Now().Add(7 * 24 * time.Hour)})
 	return c.Status(201).JSON(httpx.Response{Message: "🔓 Welcome back, " + u.Username + "! You have logged in successfully! 🎉", Data: fiber.Map{"accessToken": tokens.AccessToken}})
 }
+
 func (s *Service) clearCookie(c fiber.Ctx) {
 	c.Cookie(&fiber.Cookie{Name: "refreshToken", Value: "", HTTPOnly: true, Secure: s.production, SameSite: "Lax", Path: "/", Expires: time.Unix(0, 0)})
 }
+
 func (s *Service) logout(c fiber.Ctx) error {
 	// Clear the browser cookie even when token revocation fails.
 	s.clearCookie(c)
@@ -52,6 +37,7 @@ func (s *Service) logout(c fiber.Ctx) error {
 	}
 	return c.Status(201).JSON(httpx.Response{Message: "🎉 You have logged out successfully! see u lateer"})
 }
+
 func (s *Service) logoutAll(c fiber.Ctx) error {
 	s.clearCookie(c)
 	if err := s.sessions.LogoutAll(c.Context(), c.Cookies("refreshToken")); err != nil {

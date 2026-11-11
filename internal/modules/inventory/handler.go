@@ -3,25 +3,11 @@ package inventory
 import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
-	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-type Service struct {
-	db       *gorm.DB
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, ses *sessions.Service) *Service { return &Service{db: db, sessions: ses} }
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/inventory")
-	r.Get("/", s.findAll)
-	r.Get("/product/:id", s.byProduct)
-	r.Get("/:id", s.byID)
-	r.Patch("/:id", s.sessions.RequireAdmin, s.update)
-}
 func (s *Service) findAll(c fiber.Ctx) error {
 	page, limit, err := httpx.Page(c)
 	if err != nil {
@@ -40,6 +26,7 @@ func (s *Service) findAll(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Inventory"), Data: data, Paging: httpx.Pagination(page, limit, total)})
 }
+
 func (s *Service) byID(c fiber.Ctx) error {
 	if err := httpx.UUID(c.Params("id")); err != nil {
 		return err
@@ -53,6 +40,7 @@ func (s *Service) byID(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Inventory"), Data: m})
 }
+
 func (s *Service) byProduct(c fiber.Ctx) error {
 	if err := httpx.UUID(c.Params("id")); err != nil {
 		return err
@@ -65,13 +53,6 @@ func (s *Service) byProduct(c fiber.Ctx) error {
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Inventory"), Data: m})
-}
-
-type UpdateInput struct {
-	ProductID        *string `json:"productId"`
-	Quantity         *int    `json:"quantity"`
-	ReservedQuantity *int    `json:"reservedQuantity"`
-	IsActive         *bool   `json:"isActive"`
 }
 
 func (s *Service) update(c fiber.Ctx) error {

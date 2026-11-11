@@ -4,61 +4,9 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/promotionutil"
-	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 )
-
-type Service struct {
-	db       *gorm.DB
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, ses *sessions.Service) *Service { return &Service{db: db, sessions: ses} }
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/discounts")
-	r.Post("/", s.sessions.RequireAdmin, s.create)
-	r.Get("/", s.findAll)
-	r.Get("/:id", s.byID)
-	r.Patch("/:id", s.sessions.RequireAdmin, s.update)
-	r.Delete("/:id", s.sessions.RequireAdmin, s.remove)
-}
-
-type CreateInput struct {
-	Name          string             `json:"name"`
-	DiscountType  string             `json:"discountType"`
-	Value         *float64           `json:"value"`
-	MaxApplied    float64            `json:"maxApplied"`
-	MaxRedeemed   float64            `json:"maxRedeemed"`
-	RedeemedCount float64            `json:"redeemedCount"`
-	Description   *string            `json:"description"`
-	ProductID     *string            `json:"productId"`
-	Quantity      *float64           `json:"quantity"`
-	StartDate     promotionutil.Date `json:"startDate"`
-	EndDate       promotionutil.Date `json:"endDate"`
-}
-
-var inputFields = []string{
-	"name", "discountType", "value", "maxApplied", "maxRedeemed",
-	"redeemedCount", "description", "productId", "quantity", "startDate", "endDate",
-}
-
-func validate(b CreateInput) error {
-	if err := promotionutil.Name(b.Name, "Discount Name", 1, 100); err != nil {
-		return err
-	}
-	if err := promotionutil.Enum(b.DiscountType, "Discount Type", "PERCENTAGE", "FIXED", "FREE_ITEM", "PRICE"); err != nil {
-		return err
-	}
-	if b.Description != nil {
-		if err := promotionutil.Text(*b.Description, "Description", 1, 255); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
 
 func (s *Service) create(c fiber.Ctx) error {
 	if err := promotionutil.ValidateFields(c, promotionutil.DiscountFields(), false); err != nil {
