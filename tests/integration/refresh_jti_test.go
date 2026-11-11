@@ -3,6 +3,7 @@ package integration_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
@@ -56,5 +57,46 @@ func TestRefreshJWTUniqueJTIWithinSecond(t *testing.T) {
 	}
 	if rows != 12 {
 		t.Fatalf("expected 12 distinct persisted sessions, got %d", rows)
+	}
+}
+
+func TestExpiredRefreshCookieDoesNotBindLoginToPreviousUser(t *testing.T) {
+	db := connectPrismaFixture(t)
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	role := domain.Role{Name: "SharedBrowserFixture"}
+	if err := tx.Create(&role).Error; err != nil {
+		t.Fatal(err)
+	}
+	alice := domain.User{RoleID: role.ID.ID, Username: "OldBrowserUser", FullName: "Old Browser", Password: "fixture", IsActive: true}
+	bob := domain.User{RoleID: role.ID.ID, Username: "NewBrowserUser", FullName: "New Browser", Password: "fixture", IsActive: true}
+	for _, user := range []*domain.User{&alice, &bob} {
+		if err := tx.Create(user).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	ses := sessions.NewService(tx, "browser-access", "browser-refresh")
+	old, err := ses.NewTokens(context.Background(), alice.ID.ID, role.ID.ID, "", "Browser A", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Model(&domain.UserToken{}).Where("token = ?", old.RefreshToken).
+		Update("expiredAt", time.Now().UTC().Add(-time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
+	newTokens, err := ses.NewTokens(context.Background(), bob.ID.ID, role.ID.ID, old.RefreshToken, "Browser B", "127.0.0.2")
+	if err != nil {
+		t.Fatalf("logging in with an expired cookie should work: %v", err)
+	}
+	claims, err := ses.ActiveRefresh(context.Background(), newTokens.RefreshToken)
+	if err != nil || claims.Subject != bob.ID.ID {
+		t.Fatalf("refreshed session must belong to new user: claims=%+v err=%v", claims, err)
+	}
+	var stored domain.UserToken
+	if err := tx.Where("token = ?", newTokens.RefreshToken).First(&stored).Error; err != nil || stored.UserID != bob.ID.ID {
+		t.Fatalf("cookie reissue retained previous owner: %+v err=%v", stored, err)
 	}
 }

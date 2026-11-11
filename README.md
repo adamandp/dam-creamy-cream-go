@@ -51,15 +51,24 @@ The application does not call AutoMigrate or alter database tables on startup. U
 | MINIO_BUCKET | Private image bucket |
 | MINIO_USE_SSL | HTTPS to MinIO |
 | PUBLIC_API_URL | Public API origin for image URLs |
+| FRONTEND_ORIGINS | Comma-separated trusted frontend origins for credentialed CORS; required in production |
+| RAJAONGKIR_BASE_URL | Optional RajaOngkir API base URL; HTTPS required in production if configured |
+| RAJAONGKIR_API_KEY | Server-only shipping quote credential; configure with base URL |
+| RAJAONGKIR_RATE_LIMIT_PER_MINUTE | Redis-backed per-client-IP RajaOngkir quota; default 30, range 1–1000 |
+| RAJAONGKIR_GLOBAL_RATE_LIMIT_PER_MINUTE | Total RajaOngkir quota shared across IPs and replicas; default 30, range 1–100000 |
+| TRUSTED_PROXY_CIDRS | Optional exact trusted reverse-proxy IPs/CIDRs; no proxy header trusted by default |
 
 ## Modules
 
 - Authentication, sessions, users, roles, addresses
 - Categories, products, product detail/information, inventory, carts
 - Discounts, product discount assignments, vouchers, user voucher claims
+- Orders & Checkout (transactional stock/voucher/cart, pending payment and shipment records)
+- Shipments (owner/admin reads, admin status updates, rate-limited RajaOngkir quotes) and legacy Payments scaffold endpoints
+- Reviews, Recommendations, Product Analytics, Notifications, User Notifications (PR #5)
 - Media delivery and health checks
 
-See [API reference](docs/api.md) for supported routes, input requirements and response behavior.
+See [API reference](docs/api.md) for supported routes, input requirements and response behavior. For PR #3 checkout shape, transactional rules, concurrency tests and non-production boundaries, see [Orders / Checkout](docs/orders-checkout.md). PR #4 shipping and payment boundaries are in [Shipments / Payments](docs/shipments-payments.md).
 
 ## Project structure
 
@@ -85,7 +94,9 @@ User and product image uploads accept JPEG, PNG or WebP up to 2 MiB. MinIO bucke
 
 CI checks formatting, go mod tidy, go vet and go test. It runs integration tests against isolated PostgreSQL, Redis and MinIO services, covering GORM schema compatibility, JWT sessions, catalog, cart, promotions, category cache, and image persistence. The PR #2 security follow-up adds tests for catalog/inventory admin authorization, address owner-only access, private user directory/details, password PATCH bypass prevention, and immediate refresh-cookie revocation for Carts/Addresses after logout. Dummy login is intentionally unchanged. The later PR #2 correctness batch also unifies Cart/Catalog/Detail discount eligibility, gives refresh JWTs unique compact jti identifiers under the legacy VARCHAR(255) column limit, and versions category Redis cache pages on writes. All three have real-service regression coverage. Before PR #3, another PR #2 patch serializes primary-address transitions and inventory stock changes with PostgreSQL locks and rejects logout-all using revoked session tokens. This correction adds concurrent HTTP integration tests without changing dummy login or database schema.
 
-Never run destructive tests using production credentials. Before a public deployment, configure secrets, validate all required endpoints, and restrict CORS origins.
+Never run destructive tests using production credentials. Before a public deployment, configure secrets, validate all required endpoints, and configure FRONTEND_ORIGINS to include only trusted browser frontends.
+
+Request-bound database and media operations honor cancellation. Checkout shares cent-rounded shipping costs with voucher totals; the source NestJS checkout DTO's lack of a 50-line/100-unit cap and its date-coercion forms are preserved. Pricing unit tests live under tests/unit (not internal/).
 
 ## Migration provenance and parity
 

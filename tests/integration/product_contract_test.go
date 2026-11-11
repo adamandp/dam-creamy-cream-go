@@ -3,6 +3,7 @@ package integration_test
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -61,6 +62,23 @@ func TestCatalogAndProductInformationOnPrismaSchema(t *testing.T) {
 	if !ok || p["discountPrice"] != 9600.0 || p["discountType"] != "PERCENTAGE" || p["discountValue"] != 20.0 {
 		t.Errorf("catalog discount mapping mismatch: %v", p)
 	}
+	// ProductQuerySchema is strict and Zod distinguishes missing from empty.
+	for _, tc := range []struct {
+		query  string
+		status int
+	}{
+		// Whitespace is a valid one-character Zod string.
+		{"q=%20", 200},
+		// z.coerce.number("") == 0; max=0 excludes positive-price products.
+		{"min=", 200},
+		{"max=", 404},
+		{"q=", 400},
+		{"sort=", 400},
+		{"cat=", 400},
+		{"unknown=ignored-in-first-pass", 400},
+	} {
+		testBody(t, testCall(t, app, "GET", "/products/catalog?"+tc.query, "", "", tc.status))
+	}
 	productID := product.ID.ID
 	detail := testBody(t, testCall(t, app, "GET", "/product/"+productID, "", "", 200))
 	d, ok := detail["data"].(map[string]any)
@@ -101,5 +119,49 @@ Great flavor`
 	_ = res.Body.Close()
 	if res.StatusCode != 404 {
 		t.Errorf("inactive products should not be visible in first catalog page, got %d", res.StatusCode)
+	}
+}
+
+// Prisma's PostgreSQL contains filter uses ILIKE metacharacter semantics.
+// This is inherited source behavior, even though it is surprising to users.
+func TestCatalogSearchMetacharactersMatchNestPrisma(t *testing.T) {
+	db := connectPrismaFixture(t)
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	cat := domain.Category{Name: "Search Regex Fixture", IsActive: true}
+	if err := tx.Create(&cat).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Vanilla 100%", "Vanilla_Classic", "Vanilla! Special", "Vanilla Basic"} {
+		if err := tx.Create(&domain.Product{CategoryID: cat.ID.ID, Name: name, Price: 10000, IsActive: true}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
+	products.NewService(tx, stubImageStore{}, sessions.NewService(tx, "search-access", "search-refresh")).Routes(app)
+	for _, tc := range []struct {
+		q    string
+		want string
+	}{
+		{"%", ""},
+		{"_", ""},
+		{"%_%", ""},
+		{"!", "Vanilla! Special"},
+		{"Vanilla", ""},
+	} {
+		result := testBody(t, testCall(t, app, "GET", "/products/catalog?cat="+cat.ID.ID+"&q="+url.QueryEscape(tc.q), "", "", 200))
+		rows := requiredRows(t, result)
+		if tc.want == "" {
+			if len(rows) != 4 {
+				t.Fatalf("literal search %q returned %d rows, expected 4", tc.q, len(rows))
+			}
+			continue
+		}
+		if len(rows) != 1 || rows[0].(map[string]any)["name"] != tc.want {
+			t.Fatalf("literal search %q returned %+v, expected only %q", tc.q, rows, tc.want)
+		}
 	}
 }

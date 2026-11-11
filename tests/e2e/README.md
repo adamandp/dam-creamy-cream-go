@@ -43,4 +43,31 @@ A passing run reports, at minimum:
 
 All differences not explicitly allowlisted are errors; the test exits nonzero. Some approved errors intentionally differ semantically (Go uses 409 for FK conflicts and 400 for malformed path UUIDs instead of legacy 500). Additional scenarios verify unauthorized role renaming and anonymous/customer promotion writes are blocked (401/403). Duplicate claims, real concurrency and capacity windows are covered by Go's PostgreSQL integration suite.
 
-The suite starts both servers and database/storage/cache services using **disposable** fixtures and cleans up resources. It does not check out NestJS in GitHub Actions, so run this separately with the original NestJS repository. The CI workflow covers Go unit tests and real PostgreSQL/Redis/MinIO integration tests; it does not claim full app/checkout parity.
+The suite starts both servers and database/storage/cache services using **disposable** fixtures and cleans up resources. The CI `nest-parity` job checks out the original NestJS repository separately. Go unit tests and real PostgreSQL/Redis/MinIO integrations run in another job. These tests do not claim exhaustive application parity.
+
+## PR #5 final five domains
+
+The runner now additionally loads `fixtures/remaining_domains.sql` into both
+isolated databases and invokes `compare_remaining.py` **before** the Promotions
+mutations. It covers all 28 original HTTP routes across Reviews (7),
+Recommendations (4), Product Analytics (4), Notifications (5) and User
+Notifications (8). Stable seeded rows and JSON responses are compared exactly;
+four documented differences are allowlisted with explicit assertions:
+1. `GET /reviews` crashes in Nest (500) because its controller argument is
+   missing `@Query()`; Go serves the intended paginated list (200).
+2. `GET /reviews/me` is shadowed by `GET /reviews/:id` in Nest (500 due invalid
+   UUID); Go serves the intended self-scoped feed (200).
+3. `GET /user-notifications/me` is shadowed by its `/:id` handler in Nest
+   (400); Go serves the intended feed (200).
+4. A 404 from `GET /user-notifications/notification/:id` has the same status
+   and message but the existing Go error handler adds an `error` field.
+
+Other unapproved differences fail the audit. The observed first side-by-side
+run matched 24/28 exactly; the four known differences above are tested
+separately and do not imply full application equivalence.
+
+GitHub Actions has a dedicated `nest-parity` job that builds the original
+NestJS source and runs this side-by-side script against disposable containers.
+The earlier Promotions contract audit remains part of the same run. These
+tests verify the enumerated cases, not every edge case or production-provider
+interaction.
