@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"sort"
+
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/gofiber/fiber/v3"

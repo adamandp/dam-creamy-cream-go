@@ -3,6 +3,7 @@ package products
 import (
 	"io"
 	"mime/multipart"
+
 	"github.com/gofiber/fiber/v3"
 )
 
