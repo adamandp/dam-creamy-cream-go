@@ -44,6 +44,28 @@ func TestNestValidationRules(t *testing.T) {
 		}
 	}
 }
+
+func TestNestStringLengthUsesUTF16CodeUnits(t *testing.T) {
+	for _, tc := range []struct {
+		text string
+		want int
+	}{
+		{"vanilla", 7},
+		{"中", 1},
+		{"🍦", 2},
+		{"🍦🍦", 4},
+	} {
+		if got := httpx.JSStringLength(tc.text); got != tc.want {
+			t.Errorf("JSStringLength(%q)=%d; want %d", tc.text, got, tc.want)
+		}
+	}
+	if err := httpx.NonBlank("🍦", 2, 2, "description"); err != nil {
+		t.Fatalf("two UTF-16 code units must be accepted: %v", err)
+	}
+	if err := httpx.NonBlank("🍦", 1, 1, "description"); err == nil {
+		t.Fatal("one UTF-16 code unit limit must reject an emoji")
+	}
+}
 func TestUpdateGuard(t *testing.T) {
 	old := map[string]any{"name": "Jane", "is_active": true}
 	for _, tt := range []struct {

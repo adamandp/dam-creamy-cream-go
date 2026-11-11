@@ -33,7 +33,7 @@ type MinIOStore struct {
 }
 
 // NewMinIO connects to the existing MinIO server and creates the image bucket
-// if it has not yet been initialized. No PostgreSQL migration is performed.
+// if it has not yet been initialized. No PostgreSQL schema changes are performed.
 func NewMinIO(ctx context.Context, endpoint, accessKey, secretKey, bucket, publicAPIURL string, useSSL bool) (*MinIOStore, error) {
 	if endpoint == "" || accessKey == "" || secretKey == "" || bucket == "" || publicAPIURL == "" {
 		return nil, errors.New("MinIO endpoint, credentials, bucket and public API URL are required")

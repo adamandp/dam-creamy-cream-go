@@ -23,7 +23,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-func multipartImage(t *testing.T, app *fiber.App, method, path string, payload []byte) {
+func multipartImage(t *testing.T, app *fiber.App, method, path string, payload []byte, token ...string) {
 	t.Helper()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -43,6 +43,9 @@ func multipartImage(t *testing.T, app *fiber.App, method, path string, payload [
 	}
 	req := httptest.NewRequest(method, path, &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if len(token) > 0 {
+		req.Header.Set("Authorization", "Bearer "+token[0])
+	}
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
@@ -83,6 +86,14 @@ func TestImageRoutesWithRealMinIOAndPostgres(t *testing.T) {
 	if err := tx.Create(&user).Error; err != nil {
 		t.Fatal(err)
 	}
+	adminRole := domain.Role{Name: "Admin"}
+	if err := tx.Create(&adminRole).Error; err != nil {
+		t.Fatal(err)
+	}
+	admin := domain.User{RoleID: adminRole.ID.ID, Username: "FixtureAdmin", FullName: "Fixture Admin", Password: "test-only", IsActive: true}
+	if err := tx.Create(&admin).Error; err != nil {
+		t.Fatal(err)
+	}
 	category := domain.Category{Name: "Ice Cream", IsActive: true}
 	if err := tx.Create(&category).Error; err != nil {
 		t.Fatal(err)
@@ -93,13 +104,22 @@ func TestImageRoutesWithRealMinIOAndPostgres(t *testing.T) {
 	}
 
 	app := fiber.New(fiber.Config{ErrorHandler: httpx.ErrorHandler})
-	users.NewService(tx, sessions.NewService(tx, "access-fixture", "refresh-fixture"), store).Routes(app)
-	products.NewService(tx, store).Routes(app)
+	ses := sessions.NewService(tx, "access-fixture", "refresh-fixture")
+	ownerToken, err := ses.NewTokens(context.Background(), user.ID.ID, role.ID.ID, "", "Integration", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminToken, err := ses.NewTokens(context.Background(), admin.ID.ID, adminRole.ID.ID, "", "Integration", "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	users.NewService(tx, ses, store).Routes(app)
+	products.NewService(tx, store, ses).Routes(app)
 	media.NewService(store).Routes(app)
 
 	jpg := []byte{0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0}
-	multipartImage(t, app, "PUT", "/users/"+user.ID.ID+"/image", jpg)
-	multipartImage(t, app, "PATCH", "/products/"+product.ID.ID+"/image", jpg)
+	multipartImage(t, app, "PUT", "/users/"+user.ID.ID+"/image", jpg, ownerToken.AccessToken)
+	multipartImage(t, app, "PATCH", "/products/"+product.ID.ID+"/image", jpg, adminToken.AccessToken)
 
 	var newUser domain.User
 	if err := tx.First(&newUser, "id = ?", user.ID.ID).Error; err != nil {
@@ -134,7 +154,7 @@ func TestImageRoutesWithRealMinIOAndPostgres(t *testing.T) {
 	}
 
 	old := *newProduct.ImageURL
-	multipartImage(t, app, "PATCH", "/products/"+product.ID.ID+"/image", jpg)
+	multipartImage(t, app, "PATCH", "/products/"+product.ID.ID+"/image", jpg, adminToken.AccessToken)
 	var latest domain.Product
 	if err := tx.First(&latest, "id = ?", product.ID.ID).Error; err != nil {
 		t.Fatal(err)

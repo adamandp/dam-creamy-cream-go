@@ -6,14 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/gofiber/fiber/v3"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 )
@@ -32,33 +33,88 @@ type Paging struct {
 	TotalPages  int64 `json:"totalPages"`
 }
 
+// ValidationError matches the original NestJS ZodValidationPipe JSON contract.
+type ValidationError struct {
+	Issues []map[string]any
+}
+
+func (e *ValidationError) Error() string  { return "Validation failed" }
+func ZodIssue(issue map[string]any) error { return &ValidationError{Issues: []map[string]any{issue}} }
+
+func invalidNumber(field, label string) error {
+	return ZodIssue(map[string]any{
+		"code": "invalid_type", "expected": "number", "received": "NaN",
+		"message": fmt.Sprintf("🔢 %s must be a valid number. No funky math here! 🚫 {Invalid Number}", label),
+		"path":    []string{field},
+	})
+}
+func boundNumber(field, label string, bound int, tooSmall bool) error {
+	code, key, msg := "too_big", "maximum", "🚀 Whoa! %s is too long. Maximum allowed is %d characters! ✍️ {Maximum Length}"
+	if tooSmall {
+		code, key, msg = "too_small", "minimum", "🔡 %s must be at least %d characters. Keep going! 💪 {Minimum Length}"
+	}
+	return ZodIssue(map[string]any{
+		"code": code, "origin": "number", key: bound, "inclusive": true,
+		"message": fmt.Sprintf(msg, label, bound), "path": []string{field},
+	})
+}
 func Page(c fiber.Ctx) (int, int, error) {
-	page, limit := 1, 10
-	if raw := c.Query("page"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil {
-			return 0, 0, fiber.NewError(400, "page must be a number")
+	parse := func(field, label string, defaultValue int) (int, error) {
+		raw := c.Query(field)
+		if raw == "" && len(c.Request().URI().QueryArgs().Peek(field)) == 0 {
+			// Absent parameter uses the schema default. Empty supplied values
+			// are handled below as Zod's coerce.number("") -> 0.
+			present := false
+			c.Request().URI().QueryArgs().VisitAll(func(k, _ []byte) {
+				if string(k) == field {
+					present = true
+				}
+			})
+			if !present {
+				return defaultValue, nil
+			}
 		}
-		page = n
-	}
-	if raw := c.Query("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil {
-			return 0, 0, fiber.NewError(400, "limit must be a number")
+		n, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if raw == "" {
+			n, err = 0, nil
 		}
-		limit = n
+		if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
+			return 0, invalidNumber(field, label)
+		}
+		if n < 1 {
+			return 0, boundNumber(field, label, 1, true)
+		}
+		if n > 100 {
+			return 0, boundNumber(field, label, 100, false)
+		}
+		// The Prisma findMany skip/take arguments are integers. Zod will
+		// accept decimal notations of whole numbers such as 1.0 or 1e0.
+		if math.Trunc(n) != n {
+			return 0, invalidNumber(field, label)
+		}
+		return int(n), nil
 	}
-	if page < 1 || page > 100 || limit < 1 || limit > 100 {
-		return 0, 0, fiber.NewError(400, "page and limit must be between 1 and 100")
+	page, err := parse("page", "Page", 1)
+	if err != nil {
+		return 0, 0, err
+	}
+	limit, err := parse("limit", "Limit", 10)
+	if err != nil {
+		return 0, 0, err
 	}
 	return page, limit, nil
 }
 func Pagination(page, limit int, total int64) *Paging {
 	return &Paging{CurrentPage: page, PageSize: limit, TotalItems: total, TotalPages: (total + int64(limit) - 1) / int64(limit)}
 }
+
+var canonicalUUID = regexp.MustCompile(`^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[1-8][a-fA-F0-9]{3}-[89aAbB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$`)
+
 func UUID(id string) error {
-	if _, err := uuid.Parse(id); err != nil {
-		return fiber.NewError(400, "Invalid UUID")
+	// google/uuid.Parse also accepts urn:, curly braces and unhyphenated
+	// values; NestJS ParseUUIDPipe rejects those. Validate the wire shape.
+	if !canonicalUUID.MatchString(id) {
+		return fiber.NewError(400, "Validation failed (uuid is expected)")
 	}
 	return nil
 }
@@ -89,6 +145,10 @@ func Conflict(entity string) error {
 	return fiber.NewError(409, fmt.Sprintf("⚡ %s already exists! No duplicates allowed! 😆", entity))
 }
 func ErrorHandler(c fiber.Ctx, err error) error {
+	var validation *ValidationError
+	if errors.As(err, &validation) {
+		return c.Status(400).JSON(fiber.Map{"statusCode": 400, "message": "Validation failed", "errors": validation.Issues})
+	}
 	var fe *fiber.Error
 	if errors.As(err, &fe) {
 		return c.Status(fe.Code).JSON(fiber.Map{"statusCode": fe.Code, "message": fe.Message, "error": statusText(fe.Code)})
@@ -119,16 +179,29 @@ func statusText(code int) string {
 		return "Not Found"
 	case 409:
 		return "Conflict"
+	case 429:
+		return "Too Many Requests"
+	case 502:
+		return "Bad Gateway"
+	case 503:
+		return "Service Unavailable"
 	default:
 		return "Internal Server Error"
 	}
 }
 func NonBlank(v string, min, max int, field string) error {
-	n := len([]rune(strings.TrimSpace(v)))
+	n := JSStringLength(strings.TrimSpace(v))
 	if n < min || n > max {
 		return fiber.NewError(400, fmt.Sprintf("%s must be %d-%d characters", field, min, max))
 	}
 	return nil
+}
+
+// JSStringLength mirrors JavaScript string.length (UTF-16 code units), which
+// NestJS/Zod use for min/max validation. Go's byte len or rune count would
+// reject valid multi-byte text or accept too many astral characters.
+func JSStringLength(value string) int {
+	return len(utf16.Encode([]rune(value)))
 }
 
 func BindStrict(c fiber.Ctx, dst any) error {
@@ -229,4 +302,7 @@ func RejectNull(c fiber.Ctx, keys ...string) error {
 
 func Unauthorized() error {
 	return fiber.NewError(401, "🚪 You are not logged in. Please sign in to continue! 🔐")
+}
+func Forbidden() error {
+	return fiber.NewError(403, "Forbidden resource")
 }

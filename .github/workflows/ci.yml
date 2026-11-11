@@ -22,22 +22,30 @@ jobs:
         run: git diff --exit-code -- go.mod go.sum
       - run: go vet ./...
       - run: go test ./...
-      - name: Prisma-schema PostgreSQL integration test
+      - name: PostgreSQL schema integration test
         run: |
           set -euo pipefail
-          docker run -d --name prisma-postgres -p 127.0.0.1:55433:5432 \
+          docker run -d --name creamy-postgres -p 127.0.0.1:55433:5432 \
             -e POSTGRES_PASSWORD=fixture-only -e POSTGRES_DB=creamy_test postgres:17-alpine
           for i in $(seq 1 45); do
-            if docker exec prisma-postgres pg_isready -U postgres -d creamy_test >/dev/null 2>&1; then break; fi
+            if docker exec creamy-postgres pg_isready -U postgres -d creamy_test >/dev/null 2>&1; then break; fi
             sleep 2
           done
-          docker exec prisma-postgres pg_isready -U postgres -d creamy_test
-          for sql in tests/fixtures/prisma_migrations/*.sql; do
-            echo "Applying source Prisma migration $sql to disposable database"
-            docker exec -i prisma-postgres psql -v ON_ERROR_STOP=1 -U postgres -d creamy_test < "$sql"
+          docker exec creamy-postgres pg_isready -U postgres -d creamy_test
+          for sql in tests/fixtures/db-schema/*.sql; do
+            echo "Applying schema fixture $sql to disposable database"
+            docker exec -i creamy-postgres psql -v ON_ERROR_STOP=1 -U postgres -d creamy_test < "$sql"
           done
           PG_INTEGRATION=1 TEST_DATABASE_URL='postgresql://postgres:fixture-only@127.0.0.1:55433/creamy_test?sslmode=disable' \
             go test ./tests/integration -count=1 -v
+
+      - name: Pricing and checkout PostgreSQL race regression
+        run: |
+          set -euo pipefail
+          # All four discount types are compared through Cart, Catalog, Detail
+          # and Checkout; concurrent checkout stock/voucher tests run with -race.
+          PG_INTEGRATION=1 TEST_DATABASE_URL='postgresql://postgres:fixture-only@127.0.0.1:55433/creamy_test?sslmode=disable' \
+            go test -race ./tests/integration -run '^(TestAllDiscountTypesMatchCheckout|TestQuotaExhaustionAcrossStorefrontAndCheckout|TestCheckout)' -count=2 -v
 
       - name: Redis category-cache integration test
         run: |
@@ -64,3 +72,35 @@ jobs:
           done
           curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null
           PG_INTEGRATION=1 MINIO_INTEGRATION=1 TEST_DATABASE_URL='postgresql://postgres:fixture-only@127.0.0.1:55433/creamy_test?sslmode=disable' go test ./tests/integration -count=1 -v
+
+  nest-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: creamy-go
+      - uses: actions/checkout@v4
+        with:
+          repository: adamandp/dam-creamy-cream-be
+          ref: master
+          path: creamy-nest
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: creamy-go/go.mod
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: creamy-nest/package-lock.json
+      - name: Build original NestJS backend
+        working-directory: creamy-nest
+        env:
+          DATABASE_URL: postgresql://postgres:fixture-only@127.0.0.1:55434/nestapi?sslmode=disable
+        run: |
+          npm ci
+          npx prisma generate
+          npm run build
+      - name: Compare NestJS and Go using isolated services
+        working-directory: creamy-go
+        run: bash tests/e2e/run_compare.sh "$GITHUB_WORKSPACE/creamy-nest"

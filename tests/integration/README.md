@@ -1,1 +1,1 @@
-Integration tests belong here, separate from internal/. Add database-backed parity tests after a disposable PostgreSQL fixture with the original Prisma schema is available. Never run integration tests against production data.
+Integration tests are in this directory and run against isolated service fixtures. Never point TEST_DATABASE_URL at production.
