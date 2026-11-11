@@ -72,3 +72,35 @@ jobs:
           done
           curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null
           PG_INTEGRATION=1 MINIO_INTEGRATION=1 TEST_DATABASE_URL='postgresql://postgres:fixture-only@127.0.0.1:55433/creamy_test?sslmode=disable' go test ./tests/integration -count=1 -v
+
+  nest-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: creamy-go
+      - uses: actions/checkout@v4
+        with:
+          repository: adamandp/dam-creamy-cream-be
+          ref: master
+          path: creamy-nest
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: creamy-go/go.mod
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: creamy-nest/package-lock.json
+      - name: Build original NestJS backend
+        working-directory: creamy-nest
+        env:
+          DATABASE_URL: postgresql://postgres:fixture-only@127.0.0.1:55434/nestapi?sslmode=disable
+        run: |
+          npm ci
+          npx prisma generate
+          npm run build
+      - name: Compare NestJS and Go using isolated services
+        working-directory: creamy-go
+        run: bash tests/e2e/run_compare.sh "$GITHUB_WORKSPACE/creamy-nest"

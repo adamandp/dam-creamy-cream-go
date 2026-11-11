@@ -132,13 +132,19 @@ func (s *Service) NewTokens(ctx context.Context, userID, roleID, existing, agent
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if existing != "" {
 			var old domain.UserToken
-			if err := tx.Where("token = ?", existing).First(&old).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("token = ?", existing).First(&old).Error; err != nil {
 				return err
 			}
 			if old.ExpiredAt.After(now) {
 				return fiber.NewError(403, "✅ You are already logged in. No need to log in again! 🎉")
 			}
-			return tx.Model(&old).Updates(map[string]any{"token": refresh, "expiredAt": now.Add(7 * 24 * time.Hour)}).Error
+			// An expired cookie can belong to a previous account on a shared
+			// browser. The replacement refresh JWT is signed for the new user;
+			// rebind the persisted session as well or refresh immediately fails.
+			return tx.Model(&old).Updates(map[string]any{
+				"user_id": userID, "token": refresh, "browserInfo": string(info),
+				"expiredAt": now.Add(7 * 24 * time.Hour),
+			}).Error
 		}
 		return tx.Create(&domain.UserToken{UserID: userID, Token: refresh, BrowserInfo: string(info), ExpiredAt: now.Add(7 * 24 * time.Hour)}).Error
 	})

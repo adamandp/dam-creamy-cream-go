@@ -65,6 +65,7 @@ The application does not call AutoMigrate or alter database tables on startup. U
 - Discounts, product discount assignments, vouchers, user voucher claims
 - Orders & Checkout (transactional stock/voucher/cart, pending payment and shipment records)
 - Shipments (owner/admin reads, admin status updates, rate-limited RajaOngkir quotes) and legacy Payments scaffold endpoints
+- Reviews, Recommendations, Product Analytics, Notifications, User Notifications (PR #5)
 - Media delivery and health checks
 
 See [API reference](docs/api.md) for supported routes, input requirements and response behavior. For PR #3 checkout shape, transactional rules, concurrency tests and non-production boundaries, see [Orders / Checkout](docs/orders-checkout.md). PR #4 shipping and payment boundaries are in [Shipments / Payments](docs/shipments-payments.md).
