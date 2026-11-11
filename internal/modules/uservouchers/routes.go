@@ -1,7 +1,6 @@
 package uservouchers
 
 import (
-	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 )
 

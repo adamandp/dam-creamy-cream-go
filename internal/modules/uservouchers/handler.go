@@ -4,7 +4,6 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/promotionutil"
-	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
