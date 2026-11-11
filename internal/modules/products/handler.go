@@ -5,78 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
-	"mime/multipart"
 	"strconv"
 	"strings"
 	"time"
-
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/infrastructure"
-	"github.com/adamandp/dam-creamy-cream-go/internal/modules/pricing"
-	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 )
 
-type Service struct {
-	db       *gorm.DB
-	upload   infrastructure.ImageStore
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, upload infrastructure.ImageStore, ses *sessions.Service) *Service {
-	return &Service{db: db, upload: upload, sessions: ses}
-}
-func (s *Service) Routes(app fiber.Router) {
-	p := app.Group("/products")
-	p.Post("/", s.sessions.RequireAdmin, s.create)
-	p.Get("/", s.findAll)
-	p.Get("/catalog", s.catalog)
-	p.Patch("/:id", s.sessions.RequireAdmin, s.update)
-	p.Patch("/:id/image", s.sessions.RequireAdmin, s.updateImage)
-	p.Delete("/:id", s.sessions.RequireAdmin, s.remove)
-	details := app.Group("/product")
-	details.Get("/information/:id", s.information)
-	details.Get("/:id", s.detail)
-}
-
-type CreateInput struct {
-	CategoryID  string  `json:"categoryId"`
-	DiscountID  *string `json:"discountId"`
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
-	Price       float64 `json:"price"`
-	IsActive    *bool   `json:"isActive"`
-}
-type UpdateInput struct {
-	CategoryID  *string  `json:"categoryId"`
-	DiscountID  *string  `json:"discountId"`
-	Name        *string  `json:"name"`
-	Description *string  `json:"description"`
-	Price       *float64 `json:"price"`
-	IsActive    *bool    `json:"isActive"`
-}
-
-func checkPrice(v float64) error {
-	if v < 1000 || v > 1000000 {
-		return fiber.NewError(400, "price must be between 1000 and 1000000")
-	}
-	return nil
-}
-func (s *Service) categoryExists(id string) error {
-	var count int64
-	if err := s.db.Model(&domain.Category{}).Where("id = ?", id).Count(&count).Error; err != nil {
-		return err
-	}
-	if count == 0 {
-		return httpx.NotFound("category")
-	}
-	return nil
-}
 func (s *Service) create(c fiber.Ctx) error {
 	var b CreateInput
 	if err := httpx.BindStrict(c, &b); err != nil {
@@ -116,6 +56,7 @@ func (s *Service) create(c fiber.Ctx) error {
 	}
 	return c.Status(201).JSON(httpx.Response{Message: httpx.Message("create", "Product")})
 }
+
 func (s *Service) findAll(c fiber.Ctx) error {
 	page, limit, err := httpx.Page(c)
 	if err != nil {
@@ -134,6 +75,7 @@ func (s *Service) findAll(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Product"), Data: data, Paging: httpx.Pagination(page, limit, total)})
 }
+
 func (s *Service) update(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
@@ -203,6 +145,7 @@ func (s *Service) update(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("update", "Product")})
 }
+
 func (s *Service) remove(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
@@ -217,33 +160,7 @@ func (s *Service) remove(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("delete", "Product")})
 }
-func validatedImage(f *multipart.FileHeader) ([]byte, error) {
-	if f == nil {
-		return nil, fiber.NewError(400, "file is required")
-	}
-	if f.Size > 2*1024*1024 {
-		return nil, fiber.NewError(400, "file too large")
-	}
-	mimetype := f.Header.Get("Content-Type")
-	switch mimetype {
-	case "image/jpg", "image/jpeg", "image/png", "image/webp":
-	default:
-		return nil, fiber.NewError(400, "Only image files are allowed!")
-	}
-	src, err := f.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer src.Close()
-	bytes, err := io.ReadAll(io.LimitReader(src, 2*1024*1024+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(bytes) > 2*1024*1024 {
-		return nil, fiber.NewError(400, "file too large")
-	}
-	return bytes, nil
-}
+
 func (s *Service) updateImage(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
@@ -292,75 +209,6 @@ func (s *Service) updateImage(c fiber.Ctx) error {
 	return c.JSON(httpx.Response{Message: httpx.Message("update", "Product Image")})
 }
 
-type CatalogItem struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	ImageURL      string   `json:"imageUrl"`
-	Description   string   `json:"description"`
-	Rate          float64  `json:"rate"`
-	Price         float64  `json:"price"`
-	DiscountPrice *float64 `json:"discountPrice"`
-	DiscountType  *string  `json:"discountType"`
-	DiscountValue *float64 `json:"discountValue"`
-}
-type DetailItem struct {
-	CatalogItem
-	Category string `json:"category"`
-	Sales    int64  `json:"sales"`
-}
-type ReviewRating struct {
-	ProductID string  `gorm:"column:product_id"`
-	Average   float64 `gorm:"column:average"`
-}
-type ActiveDiscount struct {
-	ProductID string   `gorm:"column:product_id"`
-	Type      string   `gorm:"column:discount_type"`
-	Value     *float64 `gorm:"column:value"`
-}
-
-func (s *Service) ratings(ids []string) (map[string]float64, error) {
-	result := map[string]float64{}
-	if len(ids) == 0 {
-		return result, nil
-	}
-	var rows []ReviewRating
-	err := s.db.Model(&domain.Review{}).Select("product_id, AVG(rating) AS average").Where("product_id IN ?", ids).Group("product_id").Scan(&rows).Error
-	for _, r := range rows {
-		result[r.ProductID] = r.Average
-	}
-	return result, err
-}
-func (s *Service) discounts(ids []string) (map[string]ActiveDiscount, error) {
-	result := map[string]ActiveDiscount{}
-	if len(ids) == 0 {
-		return result, nil
-	}
-	var rows []ActiveDiscount
-	now := time.Now().UTC()
-	err := s.db.Table("product_discounts pd").Select("pd.product_id, d.discount_type, d.value").
-		Joins("JOIN discounts d ON d.id = pd.discount_id").
-		Where("pd.product_id IN ? AND "+pricing.ActiveAssociation, ids, now, now).
-		Scan(&rows).Error
-	for _, r := range rows {
-		result[r.ProductID] = r
-	}
-	return result, err
-}
-func summary(p domain.Product, rate float64, d ActiveDiscount) CatalogItem {
-	item := CatalogItem{ID: p.ID.ID, Name: p.Name, Rate: rate, Price: p.Price}
-	if p.ImageURL != nil {
-		item.ImageURL = *p.ImageURL
-	}
-	if p.Description != nil {
-		item.Description = *p.Description
-	}
-	if discounted := pricing.DiscountPrice(p.Price, d.Type, d.Value); discounted != nil {
-		item.DiscountType = &d.Type
-		item.DiscountValue = d.Value
-		item.DiscountPrice = discounted
-	}
-	return item
-}
 func (s *Service) catalog(c fiber.Ctx) error {
 	page, limit, err := httpx.Page(c)
 	if err != nil {
@@ -469,6 +317,7 @@ func (s *Service) catalog(c fiber.Ctx) error {
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Product"), Data: data, Paging: httpx.Pagination(page, limit, total)})
 }
+
 func (s *Service) detail(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
@@ -500,6 +349,7 @@ func (s *Service) detail(c fiber.Ctx) error {
 	item := DetailItem{CatalogItem: summary(m, ratings[id], discounts[id]), Category: category.Name, Sales: sales}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Product"), Data: item})
 }
+
 func (s *Service) information(c fiber.Ctx) error {
 	id := c.Params("id")
 	if err := httpx.UUID(id); err != nil {
@@ -546,11 +396,4 @@ func (s *Service) information(c fiber.Ctx) error {
 	}
 	lines = append(lines, "", "📦 Product Details", "• Size: "+details.Size, "• Storage: "+details.Storage, "• Shelf life: "+details.ShelfLife, "", "⚡ Why Choose This Product?", info.WhyChoose)
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Product"), Data: fiber.Map{"information": strings.TrimSpace(strings.Join(lines, "\n"))}})
-}
-
-func valueOrNil(v *string) any {
-	if v == nil {
-		return nil
-	}
-	return *v
 }

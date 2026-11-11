@@ -4,71 +4,9 @@ import (
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/promotionutil"
-	"github.com/adamandp/dam-creamy-cream-go/internal/modules/sessions"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 )
-
-type Service struct {
-	db       *gorm.DB
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, ses *sessions.Service) *Service { return &Service{db: db, sessions: ses} }
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/vouchers")
-	r.Post("/", s.sessions.RequireAdmin, s.create)
-	r.Get("/", s.findAll)
-	r.Get("/:id", s.byID)
-	r.Patch("/:id", s.sessions.RequireAdmin, s.update)
-	r.Delete("/:id", s.sessions.RequireAdmin, s.remove)
-}
-
-var inputFields = []string{
-	"code", "name", "description", "type", "group", "value", "productId",
-	"quantity", "minimumPurchase", "isActive", "startDate", "endDate",
-	"maxRedeemed", "redeemedCount",
-}
-
-type CreateInput struct {
-	Code            string             `json:"code"`
-	Name            string             `json:"name"`
-	Description     *string            `json:"description"`
-	Type            string             `json:"type"`
-	Group           string             `json:"group"`
-	Value           *float64           `json:"value"`
-	ProductID       *string            `json:"productId"`
-	Quantity        *float64           `json:"quantity"`
-	MinimumPurchase float64            `json:"minimumPurchase"`
-	IsActive        *bool              `json:"isActive"`
-	StartDate       promotionutil.Date `json:"startDate"`
-	EndDate         promotionutil.Date `json:"endDate"`
-	MaxRedeemed     float64            `json:"maxRedeemed"`
-	RedeemedCount   float64            `json:"redeemedCount"`
-}
-
-func validate(b CreateInput) error {
-	if err := promotionutil.Text(b.Code, "Code", 1, 50); err != nil {
-		return err
-	}
-	if err := promotionutil.Name(b.Name, "Name", 1, 100); err != nil {
-		return err
-	}
-	if b.Description != nil {
-		if err := promotionutil.Text(*b.Description, "Description", 1, 255); err != nil {
-			return err
-		}
-	}
-	if err := promotionutil.Enum(b.Type, "Discount Type", "PERCENTAGE", "FIXED", "FREE_ITEM"); err != nil {
-		return err
-	}
-	if err := promotionutil.Enum(b.Group, "Group", "CHECKOUT", "SHIPPING"); err != nil {
-		return err
-	}
-
-	return nil
-}
 
 func (s *Service) create(c fiber.Ctx) error {
 	if err := promotionutil.ValidateFields(c, promotionutil.VoucherFields(), false); err != nil {

@@ -2,93 +2,12 @@ package recommendations
 
 import (
 	"sort"
-
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 )
 
-type Service struct{ db *gorm.DB }
-
-func NewService(db *gorm.DB) *Service { return &Service{db: db} }
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/recommendations")
-	r.Get("/classic", s.classic)
-	r.Get("/categories", s.categories)
-	r.Get("/offers", s.offers)
-	r.Get("/related/:id", s.related)
-}
-
-type discount struct {
-	Type  string
-	Value *float64
-}
-
-type recommendation struct {
-	Product  domain.Product
-	Rate     float64
-	Sales    int64
-	Discount *discount
-}
-
-type recommendationView struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	ImageURL      string   `json:"imageUrl"`
-	Description   string   `json:"description"`
-	Rate          float64  `json:"rate"`
-	Price         float64  `json:"price"`
-	DiscountPrice *float64 `json:"discountPrice"`
-	DiscountType  *string  `json:"discountType"`
-	DiscountValue *float64 `json:"discountValue"`
-}
-
-func (p recommendation) view() recommendationView {
-	v := recommendationView{ID: p.Product.ID.ID, Name: p.Product.Name, Rate: p.Rate, Price: p.Product.Price}
-	if p.Product.ImageURL != nil {
-		v.ImageURL = *p.Product.ImageURL
-	}
-	if p.Product.Description != nil {
-		v.Description = *p.Product.Description
-	}
-	// This intentionally uses NestJS RecommendationsService's own calculation,
-	// not the corrected shared Cart/Catalog/Checkout pricing rules.
-	if p.Discount != nil && p.Discount.Value != nil && *p.Discount.Value != 0 {
-		v.DiscountType, v.DiscountValue = &p.Discount.Type, p.Discount.Value
-		amount := 0.0
-		switch p.Discount.Type {
-		case "FIXED":
-			amount = *p.Discount.Value
-		case "PERCENTAGE":
-			amount = *p.Discount.Value * p.Product.Price / 100
-		}
-		price := p.Product.Price - amount
-		v.DiscountPrice = &price
-	}
-	return v
-}
-
-func productViews(rows []recommendation) []recommendationView {
-	views := make([]recommendationView, 0, len(rows))
-	for _, row := range rows {
-		views = append(views, row.view())
-	}
-	return views
-}
-
-func rankByRatingAndSales(rows []recommendation) {
-	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Rate != rows[j].Rate {
-			return rows[i].Rate > rows[j].Rate
-		}
-		return rows[i].Sales > rows[j].Sales
-	})
-}
-
-// decorate uses bulk queries so the NestJS relations (reviews, order items,
-// active ProductDiscount and its Discount) produce the same response fields.
 func (s *Service) decorate(c fiber.Ctx, products []domain.Product) ([]recommendation, error) {
 	result := make([]recommendation, len(products))
 	if len(products) == 0 {

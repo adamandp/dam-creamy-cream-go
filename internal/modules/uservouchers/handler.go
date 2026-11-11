@@ -11,17 +11,6 @@ import (
 	"time"
 )
 
-type Service struct {
-	db       *gorm.DB
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, sessions *sessions.Service) *Service {
-	return &Service{db: db, sessions: sessions}
-}
-
-// The same current-database authorization is shared with Roles, Users and
-// Promotions, so renaming a role cannot silently bypass a separate guard.
 func (s *Service) ensureAdmin(c fiber.Ctx) error {
 	who, err := s.sessions.Actor(c)
 	if err != nil {
@@ -31,24 +20,6 @@ func (s *Service) ensureAdmin(c fiber.Ctx) error {
 		return httpx.Forbidden()
 	}
 	return nil
-}
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/user-vouchers")
-	r.Use(s.sessions.RequireActor)
-	r.Post("/", s.create)
-	r.Get("/", s.findAll)
-	r.Get("/user", s.byUser)
-	r.Get("/voucher/:id", s.byVoucher)
-	r.Patch("/:id", s.use)
-	r.Get("/:id", s.byID)
-}
-
-type CreateInput struct {
-	UserID    string             `json:"userId"`
-	VoucherID string             `json:"voucherId"`
-	ClaimedAt promotionutil.Date `json:"claimedAt"`
-	ExpiredAt promotionutil.Date `json:"expiredAt"`
 }
 
 func (s *Service) create(c fiber.Ctx) error {

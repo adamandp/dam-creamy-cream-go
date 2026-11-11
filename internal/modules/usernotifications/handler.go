@@ -10,31 +10,6 @@ import (
 	"gorm.io/gorm"
 )
 
-type Service struct {
-	db       *gorm.DB
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, ses *sessions.Service) *Service { return &Service{db: db, sessions: ses} }
-
-var createFields = []promotionutil.Field{
-	{Key: "userId", Label: "User ID", Kind: "uuid"},
-	{Key: "notificationId", Label: "Notification ID", Kind: "uuid"},
-	{Key: "isRead", Label: "Is Read", Kind: "boolean"},
-}
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/user-notifications")
-	r.Post("/", s.sessions.RequireAdmin, s.create)
-	r.Get("/", s.sessions.RequireAdmin, s.findAll)
-	r.Get("/me", s.sessions.RequireActor, s.byUser)
-	r.Get("/count/me", s.sessions.RequireActor, s.userCount)
-	r.Get("/notification/:id/count", s.sessions.RequireAdmin, s.notificationCount)
-	r.Get("/notification/:id", s.sessions.RequireAdmin, s.byNotification)
-	r.Get("/:id", s.sessions.RequireActor, s.byID)
-	r.Patch("/:id", s.sessions.RequireActor, s.updateRead)
-}
-
 func (s *Service) create(c fiber.Ctx) error {
 	if err := promotionutil.ValidateFields(c, createFields, false); err != nil {
 		return err

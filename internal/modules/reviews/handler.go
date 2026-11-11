@@ -3,7 +3,6 @@ package reviews
 import (
 	"encoding/json"
 	"time"
-
 	"github.com/adamandp/dam-creamy-cream-go/internal/domain"
 	"github.com/adamandp/dam-creamy-cream-go/internal/httpx"
 	"github.com/adamandp/dam-creamy-cream-go/internal/modules/legacyviews"
@@ -12,56 +11,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 )
-
-type Service struct {
-	db       *gorm.DB
-	sessions *sessions.Service
-}
-
-func NewService(db *gorm.DB, ses *sessions.Service) *Service {
-	return &Service{db: db, sessions: ses}
-}
-
-var createFields = []promotionutil.Field{
-	{Key: "userId", Label: "Role ID", Kind: "uuid"},
-	{Key: "productId", Label: "Product ID", Kind: "uuid"},
-	{Key: "rating", Label: "Rating", Kind: "number"},
-	{Key: "comment", Label: "Review", Kind: "string", Min: 1, Max: 255, Nullable: true},
-}
-
-var updateFields = []promotionutil.Field{
-	{Key: "comment", Label: "Review", Kind: "string", Min: 1, Max: 255, Nullable: true},
-	{Key: "rating", Label: "Rating", Kind: "number"},
-}
-
-func (s *Service) Routes(app fiber.Router) {
-	r := app.Group("/reviews")
-	r.Post("/", s.sessions.RequireActor, s.create)
-	r.Get("/", s.findAll)
-	r.Get("/product/:id", s.byProduct)
-	r.Get("/me", s.sessions.RequireActor, s.byUser)
-	r.Get("/:id", s.byID)
-	r.Patch("/:id", s.sessions.RequireActor, s.update)
-	r.Delete("/:id", s.sessions.RequireActor, s.remove)
-}
-
-func checkRating(rating float64) error {
-	if rating >= 1 && rating <= 5 {
-		return nil
-	}
-	tooSmall := rating < 1
-	code, bound, message := "too_big", 5, "🚀 Whoa! Rating is too long. Maximum allowed is 5 characters! ✍️ {Maximum Length}"
-	if tooSmall {
-		code, bound, message = "too_small", 1, "🔡 Rating must be at least 1 characters. Keep going! 💪 {Minimum Length}"
-	}
-	issue := map[string]any{"code": code, "origin": "number", "inclusive": true, "message": message, "path": []string{"rating"}}
-	if tooSmall {
-		issue["minimum"] = bound
-	} else {
-		issue["maximum"] = bound
-	}
-	return httpx.ZodIssue(issue)
-}
 
 func (s *Service) create(c fiber.Ctx) error {
 	actor, err := s.sessions.Actor(c)
@@ -122,14 +71,6 @@ func (s *Service) findAll(c fiber.Ctx) error {
 		return err
 	}
 	return c.JSON(httpx.Response{Message: httpx.Message("get", "Review"), Data: mapReviews(rows), Paging: httpx.Pagination(page, limit, total)})
-}
-
-func mapReviews(rows []domain.Review) []fiber.Map {
-	data := make([]fiber.Map, 0, len(rows))
-	for _, row := range rows {
-		data = append(data, legacyviews.Review(row))
-	}
-	return data
 }
 
 func (s *Service) byID(c fiber.Ctx) error {
