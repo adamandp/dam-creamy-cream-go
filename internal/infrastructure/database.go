@@ -37,7 +37,8 @@ func NewDatabase(ctx context.Context, cfg config.DatabaseConfig) (*Database, err
 	db, err := gorm.Open(
 		postgres.Open(connectionURL.String()),
 		&gorm.Config{
-			DisableAutomaticPing: true,
+			DisableAutomaticPing:                     true,
+			DisableForeignKeyConstraintWhenMigrating: true,
 			Logger: logger.Default.LogMode(
 				logger.Error,
 			),
