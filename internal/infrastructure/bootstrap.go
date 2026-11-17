@@ -41,6 +41,11 @@ func Bootstrap(
 	}
 	appState.cleanup = append(appState.cleanup, database.Close)
 
+	// migrate models using the existing PostgreSQL connection
+	if err := Migrate(ctx, database.Client); err != nil {
+		return nil, fmt.Errorf("migrate database: %w", err)
+	}
+
 	// initialize minio
 	// initialize minio
 	minioClient, err := NewMinIO(ctx, cfg.MinIO, log)
