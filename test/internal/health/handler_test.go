@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"dam-creamy-cream-go/internal/health"
+	"dam-creamy-cream-go/internal/modules/health"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/requestid"

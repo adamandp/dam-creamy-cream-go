@@ -6,8 +6,10 @@ import (
 	"fmt"
 
 	"dam-creamy-cream-go/internal/config"
-	"dam-creamy-cream-go/internal/health"
+	"dam-creamy-cream-go/internal/modules/categories"
+	"dam-creamy-cream-go/internal/modules/health"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
@@ -24,6 +26,7 @@ func Bootstrap(
 	ctx context.Context,
 	cfg config.Config,
 	log *logrus.Entry,
+	validate *validator.Validate,
 ) (application *Application, err error) {
 	appState := &Application{}
 
@@ -46,7 +49,6 @@ func Bootstrap(
 		return nil, fmt.Errorf("migrate database: %w", err)
 	}
 
-	// initialize minio
 	// initialize minio
 	minioClient, err := NewMinIO(ctx, cfg.MinIO, log)
 	if err != nil {
@@ -75,6 +77,14 @@ func Bootstrap(
 			MinIO:       minioClient,
 			MinIOBucket: cfg.MinIO.Bucket,
 		})
+
+	categories.RegisterRoutes(
+		app,
+		database.Client,
+		redisClient,
+		log,
+		validate,
+	)
 
 	appState.Server = app
 

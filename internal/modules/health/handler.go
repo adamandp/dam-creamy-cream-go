@@ -19,13 +19,16 @@ func NewHandler(service *Service) *Handler {
 // CheckGo handles the application's liveness probe.
 func (h *Handler) CheckGo(c fiber.Ctx) error {
 	c.Set(fiber.HeaderCacheControl, "no-store")
+
 	return c.Status(fiber.StatusOK).JSON(types.WebResponse[Result]{Message: "Application is healthy", Data: h.service.CheckGo()})
 }
 
 // CheckDB handles the database readiness probe.
 func (h *Handler) CheckDB(c fiber.Ctx) error {
 	c.Set(fiber.HeaderCacheControl, "no-store")
+
 	result := h.service.CheckDB(c.Context())
+
 	if result.Status != "ok" {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(types.WebResponse[Result]{
 			Message: "Database health check failed",
@@ -40,7 +43,9 @@ func (h *Handler) CheckDB(c fiber.Ctx) error {
 // CheckRedis handles the Redis readiness probe.
 func (h *Handler) CheckRedis(c fiber.Ctx) error {
 	c.Set(fiber.HeaderCacheControl, "no-store")
+
 	result := h.service.CheckRedis(c.Context())
+
 	if result.Status != "ok" {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(types.WebResponse[Result]{
 			Message: "Redis health check failed",

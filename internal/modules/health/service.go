@@ -27,6 +27,7 @@ func (s *Service) CheckDB(ctx context.Context) Result {
 
 	// check connectivity directly through the existing SQL pool
 	pool, err := s.params.Database.DB()
+
 	if err != nil || pool.PingContext(ctx) != nil {
 		return Result{Status: "unavailable"}
 	}
@@ -54,7 +55,9 @@ func (s *Service) CheckMinIO(ctx context.Context) Result {
 	if s.params.MinIO == nil || s.params.MinIOBucket == "" {
 		return Result{Status: "unavailable"}
 	}
+
 	exists, err := s.params.MinIO.BucketExists(ctx, s.params.MinIOBucket)
+
 	if err != nil || !exists {
 		return Result{Status: "unavailable"}
 	}

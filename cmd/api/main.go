@@ -40,7 +40,12 @@ func main() {
 	log := infrastructure.New(cfg.AppEnv)
 
 	// bootstrap shared application dependencies
-	application, err := infrastructure.Bootstrap(ctx, cfg, log)
+	application, err := infrastructure.Bootstrap(
+		ctx,
+		cfg,
+		log,
+		validate,
+	)
 	if err != nil {
 		log.WithError(err).Error("Application bootstrap failed")
 		os.Exit(1)

@@ -16,3 +16,5 @@ type WebResponse[T any] struct {
 	Data    T       `json:"data,omitempty"`
 	Paging  *Paging `json:"paging,omitempty"`
 }
+
+type MessageResponse = WebResponse[*struct{}]
