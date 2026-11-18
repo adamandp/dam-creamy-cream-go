@@ -2,7 +2,9 @@ package infrastructure
 
 import (
 	"dam-creamy-cream-go/internal/modules/categories"
+	"dam-creamy-cream-go/internal/modules/discounts"
 	"dam-creamy-cream-go/internal/modules/health"
+	"dam-creamy-cream-go/internal/modules/productdiscounts"
 	"dam-creamy-cream-go/internal/modules/products"
 
 	"github.com/go-playground/validator/v10"
@@ -37,12 +39,28 @@ func registerModules(
 		validate,
 	)
 
-	products.RegisterRoutes(
+	productsService := products.RegisterRoutes(
 		router,
 		db,
 		categoriesService,
 		minioClient,
 		minioBucket,
+		log,
+		validate,
+	)
+
+	discountsService := discounts.RegisterRoutes(
+		router,
+		db,
+		log,
+		validate,
+	)
+
+	productdiscounts.RegisterRoutes(
+		router,
+		db,
+		productsService,
+		discountsService,
 		log,
 		validate,
 	)
