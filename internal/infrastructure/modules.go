@@ -1,0 +1,49 @@
+package infrastructure
+
+import (
+	"dam-creamy-cream-go/internal/modules/categories"
+	"dam-creamy-cream-go/internal/modules/health"
+	"dam-creamy-cream-go/internal/modules/products"
+
+	"github.com/go-playground/validator/v10"
+	"github.com/gofiber/fiber/v3"
+	"github.com/minio/minio-go/v7"
+	"github.com/redis/go-redis/v9"
+	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
+)
+
+func registerModules(
+	router fiber.Router,
+	db *gorm.DB,
+	redisClient *redis.Client,
+	minioClient *minio.Client,
+	minioBucket string,
+	log *logrus.Entry,
+	validate *validator.Validate,
+) {
+	health.RegisterRoutes(router, health.Params{
+		Database:    db,
+		Redis:       redisClient,
+		MinIO:       minioClient,
+		MinIOBucket: minioBucket,
+	})
+
+	categoriesService := categories.RegisterRoutes(
+		router,
+		db,
+		redisClient,
+		log,
+		validate,
+	)
+
+	products.RegisterRoutes(
+		router,
+		db,
+		categoriesService,
+		minioClient,
+		minioBucket,
+		log,
+		validate,
+	)
+}

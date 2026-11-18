@@ -6,9 +6,6 @@ import (
 	"fmt"
 
 	"dam-creamy-cream-go/internal/config"
-	"dam-creamy-cream-go/internal/modules/categories"
-	"dam-creamy-cream-go/internal/modules/health"
-	"dam-creamy-cream-go/internal/modules/products"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
@@ -70,27 +67,11 @@ func Bootstrap(
 	app.Use(logger.New())
 	app.Use(recover.New())
 
-	// register application routes
-	health.RegisterRoutes(app,
-		health.Params{
-			Database:    database.Client,
-			Redis:       redisClient,
-			MinIO:       minioClient,
-			MinIOBucket: cfg.MinIO.Bucket,
-		})
-
-	categoriesService := categories.RegisterRoutes(
+	// register application modules
+	registerModules(
 		app,
 		database.Client,
 		redisClient,
-		log,
-		validate,
-	)
-
-	products.RegisterRoutes(
-		app,
-		database.Client,
-		categoriesService,
 		minioClient,
 		cfg.MinIO.Bucket,
 		log,
