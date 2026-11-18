@@ -14,7 +14,7 @@ func RegisterRoutes(
 	redis *redis.Client,
 	log *logrus.Entry,
 	validate *validator.Validate,
-) {
+) *Service {
 	service := NewService(db, redis, log)
 	handler := NewHandler(service, validate)
 
@@ -25,4 +25,6 @@ func RegisterRoutes(
 	group.Get("/:id", handler.FindByID)
 	group.Patch("/:id", handler.Update)
 	group.Delete("/:id", handler.Delete)
+
+	return service
 }
