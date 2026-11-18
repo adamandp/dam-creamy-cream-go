@@ -4,6 +4,7 @@ import (
 	"dam-creamy-cream-go/internal/modules/categories"
 	"dam-creamy-cream-go/internal/modules/discounts"
 	"dam-creamy-cream-go/internal/modules/health"
+	"dam-creamy-cream-go/internal/modules/inventory"
 	"dam-creamy-cream-go/internal/modules/productdiscounts"
 	"dam-creamy-cream-go/internal/modules/products"
 
@@ -61,6 +62,13 @@ func registerModules(
 		db,
 		productsService,
 		discountsService,
+		log,
+		validate,
+	)
+
+	inventory.RegisterRoutes(
+		router,
+		db,
 		log,
 		validate,
 	)
