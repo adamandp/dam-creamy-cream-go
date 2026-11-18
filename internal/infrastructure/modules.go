@@ -8,6 +8,8 @@ import (
 	"dam-creamy-cream-go/internal/modules/product"
 	"dam-creamy-cream-go/internal/modules/productdiscounts"
 	"dam-creamy-cream-go/internal/modules/products"
+	"dam-creamy-cream-go/internal/modules/recommendations"
+	"dam-creamy-cream-go/internal/modules/vouchers"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
@@ -77,6 +79,21 @@ func registerModules(
 	product.RegisterRoutes(
 		router,
 		db,
+		log,
+		validate,
+	)
+
+	recommendations.RegisterRoutes(
+		router,
+		db,
+		log,
+		validate,
+	)
+
+	vouchers.RegisterRoutes(
+		router,
+		db,
+		productsService,
 		log,
 		validate,
 	)
